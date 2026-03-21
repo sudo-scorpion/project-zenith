@@ -18,7 +18,7 @@ You will never need to configure a terminal again.
 *Prerequisites: Ensure you have a GPU and roughly 3GB of space for the Llama neural weights.*
 
 ```bash
-git clone https://github.com/YOUR_USER/project-zenith.git
+git clone https://github.com/sudo-scorpion/project-zenith.git
 cd project-zenith 
 chmod +x zenith.sh
 ./zenith.sh

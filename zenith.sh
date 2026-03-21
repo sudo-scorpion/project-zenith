@@ -8,7 +8,7 @@ set -e
 
 # --- Metadata & System Paths ---
 VERSION="2026.09.99"
-REPO_URL="https://raw.githubusercontent.com/YOUR_USER/project-zenith/main/zenith.sh"
+REPO_URL="https://raw.githubusercontent.com/sudo-scorpion/project-zenith/main/zenith.sh"
 ZENITH_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" &> /dev/null && pwd)
 
 # --- Visual Branding ---
