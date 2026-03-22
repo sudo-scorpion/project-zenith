@@ -30,19 +30,25 @@ class Paths:
     last_pwd_file: Path
     session_stderr_file: Path
     upgrade_state_file: Path
+    context_file: Path
+    agent_log_dir: Path
+    plugins_dir: Path
+    themes_dir: Path
 
 
 @dataclass
 class ResolvedConfig:
     profile: str = "safe"
     mode: str = "auto"
-    shell: str = "bash"
+    shell: str = "zsh"
     features: dict[str, Any] = field(default_factory=dict)
     ai: dict[str, Any] = field(default_factory=dict)
     surface: dict[str, Any] = field(default_factory=dict)
     updates: dict[str, Any] = field(default_factory=dict)
     workspace: dict[str, Any] = field(default_factory=dict)
     paths: dict[str, Any] = field(default_factory=dict)
+    agent: dict[str, Any] = field(default_factory=dict)
+    plugins: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -80,3 +86,31 @@ class AIResult:
     risk: str
     explanation: str
     requires_confirmation: bool
+
+
+@dataclass
+class TaskContext:
+    current_task: str = ""
+    project_root: str = ""
+    recent_errors: list[str] = field(default_factory=list)
+    session_start: str = ""
+
+
+@dataclass
+class AgentStep:
+    index: int
+    command: str
+    risk: str
+    stdout: str
+    stderr: str
+    exit_code: int
+    timestamp: str
+
+
+@dataclass
+class AgentRun:
+    goal: str
+    started: str
+    steps: list[AgentStep] = field(default_factory=list)
+    status: str = "running"
+    abort_reason: str = ""

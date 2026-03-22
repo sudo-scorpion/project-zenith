@@ -9,7 +9,7 @@ from .shells import SUPPORTED_SHELLS, detect_default_shell, normalize_shell
 DEFAULTS = {
     "profile": "safe",
     "mode": "auto",
-    "shell": "bash",
+    "shell": "zsh",
     "features": {
         "core": False,
         "surface": False,
@@ -22,14 +22,21 @@ DEFAULTS = {
     "ai": {
         "provider": "ollama",
         "host": "http://127.0.0.1:11434",
-        "model": "qwen3.5:4b",
-        "ask_model": "",
-        "fix_model": "",
-        "keep_alive": "15m",
+        "model": "qwen2.5-coder:7b",
+        "ask_model": "qwen2.5-coder:7b",
+        "fix_model": "qwen2.5-coder:7b",
+        "agent_model": "qwen2.5-coder:7b",
+        "models": {
+            "ask": "qwen2.5-coder:7b",
+            "fix": "qwen2.5-coder:7b",
+            "agent": "qwen2.5-coder:7b",
+        },
+        "keep_alive": "30m",
         "timeout_seconds": 90,
         "temperature": 0.0,
         "num_ctx": 4096,
         "num_predict": 160,
+        "num_gpu": 99,
         "top_k": 40,
         "top_p": 0.9,
         "repeat_penalty": 1.05,
@@ -41,6 +48,7 @@ DEFAULTS = {
         "terminal": "kitty",
         "orbit_profile": "celestial",
         "auto_sync": False,
+        "theme": "",
     },
     "updates": {
         "check_on_startup": False,
@@ -58,6 +66,15 @@ DEFAULTS = {
         "install_root": "~/.local/share/zenith",
         "log_dir": "~/.config/zenith/logs",
     },
+    "agent": {
+        "max_steps": 8,
+        "pause_on_review": True,
+        "log_runs": True,
+        "step_timeout": 30,
+    },
+    "plugins": {
+        "enabled": True,
+    },
 }
 
 FEATURE_KEYS = ("core", "surface", "ai_nav", "ai_fix", "workspace", "orbit", "alias_overrides")
@@ -67,11 +84,13 @@ AI_KEYS = (
     "model",
     "ask_model",
     "fix_model",
+    "agent_model",
     "keep_alive",
     "timeout_seconds",
     "temperature",
     "num_ctx",
     "num_predict",
+    "num_gpu",
     "top_k",
     "top_p",
     "repeat_penalty",
@@ -79,7 +98,9 @@ AI_KEYS = (
     "auto_execute_safe",
     "log_generated_commands",
 )
-SURFACE_KEYS = ("terminal", "orbit_profile", "auto_sync")
+AGENT_KEYS = ("max_steps", "pause_on_review", "log_runs", "step_timeout")
+PLUGIN_KEYS = ("enabled",)
+SURFACE_KEYS = ("terminal", "orbit_profile", "auto_sync", "theme")
 UPDATE_KEYS = (
     "check_on_startup",
     "recommend_on_startup",
@@ -118,6 +139,17 @@ SECTION_COMMENTS = {
     "paths": [
         "Zenith-owned paths in your user space.",
     ],
+    "agent": [
+        "Agent loop settings.",
+        "max_steps: maximum number of steps before the agent stops.",
+        "pause_on_review: require confirmation before executing review-level steps.",
+        "log_runs: write a JSON log of each agent run to ~/.local/share/zenith/agent/.",
+        "step_timeout: seconds before a step is killed.",
+    ],
+    "plugins": [
+        "Plugin system settings.",
+        "enabled: load plugins from ~/.config/zenith/plugins/.",
+    ],
 }
 
 
@@ -154,6 +186,15 @@ def _format_toml(config: ResolvedConfig) -> str:
     lines.extend(_render_section("features", config.features, FEATURE_KEYS))
     lines.append("")
     lines.extend(_render_section("ai", config.ai, AI_KEYS))
+    # Render [ai.models] sub-table
+    models = config.ai.get("models", {})
+    if models:
+        lines.append("")
+        lines.append("# Per-task model routing: zen models set <task> <model>")
+        lines.append("[ai.models]")
+        for task in ("ask", "fix", "agent"):
+            if task in models:
+                lines.append(f"{task} = {_toml_scalar(models[task])}")
     lines.append("")
     lines.extend(_render_section("surface", config.surface, SURFACE_KEYS))
     lines.append("")
@@ -162,20 +203,28 @@ def _format_toml(config: ResolvedConfig) -> str:
     lines.extend(_render_section("workspace", config.workspace, WORKSPACE_KEYS))
     lines.append("")
     lines.extend(_render_section("paths", config.paths, PATH_KEYS))
+    lines.append("")
+    lines.extend(_render_section("agent", config.agent, AGENT_KEYS))
+    lines.append("")
+    lines.extend(_render_section("plugins", config.plugins, PLUGIN_KEYS))
     return "\n".join(lines) + "\n"
 
 
 def default_config(profile: str = "safe", mode: str = "auto", shell: str | None = None) -> ResolvedConfig:
+    ai = dict(DEFAULTS["ai"])
+    ai["models"] = dict(DEFAULTS["ai"]["models"])
     cfg = ResolvedConfig(
         profile=profile,
         mode=mode,
         shell=normalize_shell(shell or detect_default_shell() or DEFAULTS["shell"]),
         features=dict(DEFAULTS["features"]),
-        ai=dict(DEFAULTS["ai"]),
+        ai=ai,
         surface=dict(DEFAULTS["surface"]),
         updates=dict(DEFAULTS["updates"]),
         workspace=dict(DEFAULTS["workspace"]),
         paths=dict(DEFAULTS["paths"]),
+        agent=dict(DEFAULTS["agent"]),
+        plugins=dict(DEFAULTS["plugins"]),
     )
     cfg.features["alias_overrides"] = profile == "personal"
     return cfg
@@ -195,6 +244,7 @@ def load_config(
     cli_shell: str | None = None,
     cli_terminal: str | None = None,
 ) -> ResolvedConfig:
+    from .logging_utils import warn as _warn
     cfg = default_config()
     if paths.config_file.exists():
         import tomllib
@@ -203,12 +253,35 @@ def load_config(
         cfg.profile = data.get("profile", cfg.profile)
         cfg.mode = data.get("mode", cfg.mode)
         cfg.shell = data.get("shell", cfg.shell)
+
+        _known: dict[str, tuple[str, ...]] = {
+            "features": FEATURE_KEYS,
+            "ai": AI_KEYS + ("models",),
+            "surface": SURFACE_KEYS,
+            "updates": UPDATE_KEYS,
+            "workspace": WORKSPACE_KEYS,
+            "paths": PATH_KEYS,
+            "agent": AGENT_KEYS,
+            "plugins": PLUGIN_KEYS,
+        }
+        for section, known_keys in _known.items():
+            section_data = data.get(section, {})
+            for unknown in set(section_data) - set(known_keys):
+                _warn(f"Unknown config key [{section}].{unknown} — ignored")
+
         cfg.features.update(data.get("features", {}))
-        cfg.ai.update(data.get("ai", {}))
+        ai_data = dict(data.get("ai", {}))
+        # Extract and merge [ai.models] sub-table separately
+        file_models = ai_data.pop("models", {})
+        cfg.ai.update(ai_data)
+        if isinstance(file_models, dict):
+            cfg.ai.setdefault("models", {}).update(file_models)
         cfg.surface.update(data.get("surface", {}))
         cfg.updates.update(data.get("updates", {}))
         cfg.workspace.update(data.get("workspace", {}))
         cfg.paths.update(data.get("paths", {}))
+        cfg.agent.update(data.get("agent", {}))
+        cfg.plugins.update(data.get("plugins", {}))
     if cli_profile:
         cfg.profile = cli_profile
         cfg.features["alias_overrides"] = cli_profile == "personal"
@@ -256,11 +329,11 @@ def validate_config(config: ResolvedConfig) -> None:
         raise ValueError("Config ai.model must be set")
     if "nav_model" in config.ai and not str(config.ai.get("ask_model", "")).strip():
         config.ai["ask_model"] = config.ai.get("nav_model", "")
-    for key in ("ask_model", "fix_model"):
+    for key in ("ask_model", "fix_model", "agent_model"):
         if key in config.ai and config.ai[key] is not None:
             config.ai[key] = str(config.ai[key]).strip()
-    for key in ("timeout_seconds", "num_ctx", "num_predict", "top_k"):
-        value = int(config.ai.get(key, DEFAULTS["ai"][key]))
+    for key in ("timeout_seconds", "num_ctx", "num_predict", "top_k", "num_gpu"):
+        value = int(config.ai.get(key, DEFAULTS["ai"].get(key, 1)))
         if value <= 0:
             raise ValueError(f"Config ai.{key} must be greater than zero")
         config.ai[key] = value
@@ -280,3 +353,14 @@ def validate_config(config: ResolvedConfig) -> None:
     config.updates["startup_interval_hours"] = interval
     if not config.paths.get("install_root") or not config.paths.get("log_dir"):
         raise ValueError("Config paths.install_root and paths.log_dir must be set")
+    max_steps = int(config.agent.get("max_steps", DEFAULTS["agent"]["max_steps"]))
+    if max_steps < 1:
+        raise ValueError("Config agent.max_steps must be at least 1")
+    config.agent["max_steps"] = max_steps
+    step_timeout = int(config.agent.get("step_timeout", DEFAULTS["agent"]["step_timeout"]))
+    if step_timeout < 1:
+        raise ValueError("Config agent.step_timeout must be at least 1")
+    config.agent["step_timeout"] = step_timeout
+    for key in ("pause_on_review", "log_runs"):
+        config.agent[key] = bool(config.agent.get(key, DEFAULTS["agent"][key]))
+    config.plugins["enabled"] = bool(config.plugins.get("enabled", True))

@@ -11,10 +11,11 @@ def build_paths(root: Path | None = None) -> Paths:
     home = Path.home()
     config_home = Path(os.environ.get("XDG_CONFIG_HOME", home / ".config"))
     data_home = Path(os.environ.get("XDG_DATA_HOME", home / ".local/share"))
+    cache_home = Path(os.environ.get("XDG_CACHE_HOME", home / ".cache"))
     bin_home = home / ".local/bin"
     config_dir = config_home / "zenith"
     share_dir = data_home / "zenith"
-    cache_dir = config_dir / "cache"
+    cache_dir = cache_home / "zenith"
     state_dir = config_dir / "state"
     log_dir = config_dir / "logs"
     audit_dir = share_dir / "audit"
@@ -30,6 +31,10 @@ def build_paths(root: Path | None = None) -> Paths:
     last_pwd_file = state_dir / "last_pwd"
     session_stderr_file = state_dir / "session.stderr"
     upgrade_state_file = state_dir / "upgrade_state.json"
+    context_file = state_dir / "context.json"
+    agent_log_dir = share_dir / "agent"
+    plugins_dir = config_dir / "plugins"
+    themes_dir = config_dir / "themes"
     return Paths(
         root=root,
         home=home,
@@ -54,6 +59,10 @@ def build_paths(root: Path | None = None) -> Paths:
         last_pwd_file=last_pwd_file,
         session_stderr_file=session_stderr_file,
         upgrade_state_file=upgrade_state_file,
+        context_file=context_file,
+        agent_log_dir=agent_log_dir,
+        plugins_dir=plugins_dir,
+        themes_dir=themes_dir,
     )
 
 
@@ -69,6 +78,9 @@ def ensure_state_dirs(paths: Paths) -> None:
         paths.manifest_dir,
         paths.session_dir,
         paths.prompt_dir,
+        paths.agent_log_dir,
+        paths.plugins_dir,
+        paths.themes_dir,
         paths.bin_home,
     ):
         path.mkdir(parents=True, exist_ok=True)

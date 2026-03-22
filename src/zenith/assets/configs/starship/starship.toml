@@ -1,13 +1,268 @@
-format = """[╭─](bold cyan)$directory$git_branch$git_status
-[╰─](bold cyan)[zen](bold yellow) """
+# =============================================================================
+# Zenith Starship — Tokyo Night powerline
+# Two-line prompt: [OS][dir][git] ··· [lang] [time]
+#                  ╰─❯
+# =============================================================================
+
+format = """
+[](fg:blue_dim)\
+$os\
+$username\
+$hostname\
+[](fg:blue_dim bg:blue)\
+$directory\
+$git_branch\
+$git_state\
+$git_status\
+$git_metrics\
+$fill\
+$python\
+$conda\
+$nodejs\
+$rust\
+$golang\
+$java\
+$docker_context\
+$container\
+$cmd_duration\
+$time\
+$line_break\
+$character"""
+
+add_newline = true
+palette     = "tokyo_night"
+
+# =============================================================================
+# Palette
+# =============================================================================
+
+[palettes.tokyo_night]
+bg       = "#1a1b26"
+blue     = "#7aa2f7"
+blue_dim = "#3d59a1"
+cyan     = "#7dcfff"
+green    = "#9ece6a"
+magenta  = "#bb9af7"
+orange   = "#ff9e64"
+red      = "#f7768e"
+teal     = "#73daca"
+yellow   = "#e0af68"
+white    = "#cdd6f4"
+grey     = "#565f89"
+grey_dim = "#24283b"
+
+# =============================================================================
+# Segment 1 — OS icon on deep blue
+# Opening left cap rendered in format above via [](fg:blue_dim)
+# =============================================================================
+
+[os]
+disabled = false
+format   = "[$symbol ]($style)"
+style    = "bg:blue_dim fg:white bold"
+
+[os.symbols]
+Linux   = " "
+Fedora  = " "
+Ubuntu  = " "
+Debian  = " "
+Arch    = " "
+Windows = " "
+Macos   = " "
+
+# Only shown over SSH or as root
+[username]
+show_always = false
+format      = "[ $user ]($style)"
+style_user  = "bg:blue_dim fg:cyan bold"
+style_root  = "bg:red fg:white bold"
+
+[hostname]
+ssh_only = true
+format   = "[@$hostname ]($style)"
+style    = "bg:blue_dim fg:cyan"
+
+# =============================================================================
+# Segment 2 — Directory on bright blue
+# Transition [](fg:blue_dim bg:blue) rendered in format above
+# =============================================================================
 
 [directory]
-style = "bold cyan"
-truncate_to_repo = false
+format            = "[ $path ]($style)[$read_only]($read_only_style)"
+style             = "bg:blue fg:bg bold"
+read_only         = "  "
+read_only_style   = "bg:blue fg:red"
+truncation_length = 4
+truncate_to_repo  = true
+home_symbol       = "~"
+use_logical_path  = true
+
+[directory.substitutions]
+"Documents" = "󰈙 "
+"Downloads" = "󰇚 "
+"Music"     = "󰝚 "
+"Pictures"  = "󰉏 "
+"Videos"    = "󰕧 "
+".config"   = " "
+"src"       = " "
+"code"      = "󰨞 "
+
+# =============================================================================
+# Segment 3 — Git on purple/magenta
+# Opening transition [](fg:blue bg:magenta) is INSIDE git_branch format
+# Closing transition [](fg:magenta) is INSIDE git_status format
+# Both segments only render when inside a git repo → clean when outside
+# =============================================================================
 
 [git_branch]
-symbol = "git:"
-style = "bold yellow"
+format            = "[](fg:blue bg:magenta)[ $symbol$branch(:$remote_branch) ]($style)"
+symbol            = " "
+style             = "bg:magenta fg:bg bold"
+truncation_length = 28
+
+[git_commit]
+format             = "[ $hash$tag ]($style)"
+style              = "bg:magenta fg:bg"
+commit_hash_length = 7
+tag_symbol         = "  "
+only_detached      = true
+
+[git_state]
+format       = "[ $state($progress_current/$progress_total) ]($style)"
+style        = "bg:orange fg:bg bold"
+rebase       = "REBASE"
+merge        = "MERGE"
+revert       = "REVERT"
+cherry_pick  = "CHERRY"
+bisect       = "BISECT"
+am           = "AM"
+am_or_rebase = "AM/REBASE"
 
 [git_status]
-style = "bold red"
+# Closing cap [](fg:magenta) always renders when in a git repo
+format     = "([$all_status$ahead_behind ]($style))[](fg:magenta)"
+style      = "bg:magenta fg:bg bold"
+conflicted = "󰩌 "
+ahead      = "⇡${count}"
+behind     = "⇣${count}"
+diverged   = "⇕⇡${ahead_count}⇣${behind_count}"
+up_to_date = ""
+untracked  = "? "
+stashed    = " "
+modified   = "! "
+staged     = "+ "
+renamed    = "» "
+deleted    = "✘ "
+
+# Inline +/-  counts, no background, only shown when there are changes
+[git_metrics]
+disabled           = false
+format             = "([+$added]($added_style))([-$deleted]($deleted_style)) "
+added_style        = "fg:green bold"
+deleted_style      = "fg:red bold"
+only_nonzero_diffs = true
+
+# =============================================================================
+# Fill — separates left powerline from right info
+# =============================================================================
+
+[fill]
+symbol = " "
+
+# =============================================================================
+# Right side — language badges, duration, time (no backgrounds, subtle)
+# =============================================================================
+
+[python]
+format         = "[ $symbol$version( $virtualenv) ]($style)"
+symbol         = " "
+style          = "fg:yellow"
+detect_files   = ["requirements.txt", "setup.py", "setup.cfg", "pyproject.toml", "Pipfile", ".python-version"]
+detect_folders = [".venv", "venv", "__pycache__"]
+python_binary  = ["python3", "python"]
+version_format = "${major}.${minor}"
+
+[conda]
+format      = "[ $symbol$environment ]($style)"
+symbol      = "󰤖 "
+style       = "fg:green"
+ignore_base = true
+
+[nodejs]
+format         = "[ $symbol$version ]($style)"
+symbol         = " "
+style          = "fg:green"
+version_format = "${major}"
+detect_files   = ["package.json", ".node-version", ".nvmrc"]
+detect_folders = ["node_modules"]
+
+[rust]
+format         = "[ $symbol$version ]($style)"
+symbol         = " "
+style          = "fg:orange"
+version_format = "${major}.${minor}"
+
+[golang]
+format         = "[ $symbol$version ]($style)"
+symbol         = " "
+style          = "fg:cyan"
+version_format = "${major}.${minor}"
+
+[java]
+format         = "[ $symbol$version ]($style)"
+symbol         = " "
+style          = "fg:red"
+version_format = "${major}"
+
+[docker_context]
+format          = "[ $symbol$context ]($style)"
+symbol          = " "
+style           = "fg:blue"
+only_with_files = true
+detect_files    = ["docker-compose.yml", "docker-compose.yaml", "Dockerfile"]
+
+[container]
+format = "[ $symbol$name ]($style)"
+symbol = " "
+style  = "fg:cyan dimmed"
+
+[cmd_duration]
+min_time          = 2_000
+format            = "[ 󱦟 $duration ]($style)"
+style             = "fg:yellow"
+show_milliseconds = false
+
+[time]
+disabled    = false
+format      = "[ 󰥔 $time ]($style)"
+style       = "fg:grey"
+time_format = "%H:%M"
+use_12hr    = false
+
+# =============================================================================
+# Line 2 — ╰─❯ connector, colors by exit status and vi mode
+# =============================================================================
+
+[character]
+success_symbol            = "[╰─❯](bold green)"
+error_symbol              = "[╰─❯](bold red)"
+vimcmd_symbol             = "[╰─❮](bold magenta)"
+vimcmd_replace_one_symbol = "[╰─❮](bold yellow)"
+vimcmd_replace_symbol     = "[╰─❮](bold yellow)"
+vimcmd_visual_symbol      = "[╰─❮](bold cyan)"
+
+# =============================================================================
+# Disabled noise
+# =============================================================================
+
+[aws]
+disabled = true
+
+[gcloud]
+disabled = true
+
+[azure]
+disabled = true
+
+[package]
+disabled = true

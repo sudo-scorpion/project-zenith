@@ -1,0 +1,11 @@
+A shell step failed. Determine whether the overall goal is now unachievable.
+Overall goal: {{GOAL}}
+Failed command: {{COMMAND}}
+Exit code: {{EXIT_CODE}}
+stderr: {{STDERR}}
+
+Return JSON only.
+Schema: {"abort": true_or_false, "reason": "brief explanation"}
+
+Set abort to true only if the failure makes the goal impossible to achieve.
+Set abort to false if the agent can adapt and continue toward the goal.

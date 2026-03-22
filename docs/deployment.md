@@ -7,157 +7,122 @@ This page explains, in plain English, what Zenith does in each setup mode.
 For most users, the recommended command is:
 
 ```bash
-./bootstrap.sh
+./bootstrap.sh host --terminal kitty
 ```
 
-That means **hybrid mode**.
+That means **host mode**. Everything goes directly onto your machine in user space — no containers needed for daily work.
 
-Hybrid mode is designed to keep the host light and keep the heavy runtime in Podman.
+Host mode:
+- installs all shell and terminal tools on your machine via `sudo dnf` (or your distro's package manager)
+- installs Kitty terminal in user space
+- deploys starship prompt, zsh config, fzf, autosuggestions, syntax highlighting
+- makes `ai` and `fix` shortcuts available in every shell session
+- keeps everything under your home directory and user-owned paths
 
-Host:
-- installs the lightweight Zenith CLI
-- keeps changes inside your user account
-- does not install heavy AI or terminal packages on the host
-- does not use `sudo`
-
-Container:
-- builds a persistent Podman image and container
-- installs heavy runtime tools such as `ollama`, `zellij`, `yazi`, and `starship`
-- pulls the configured Ollama model in the container
-- keeps Zenith runtime state in Podman volumes
-
-Not included:
-- host GUI `surface`
-- host package-manager installs
+No container is needed in host mode. Zellij, Ollama, and all tools run directly on your machine. The container is only relevant in hybrid mode.
 
 ## Scenarios
 
-### `./bootstrap.sh`
+### `./bootstrap.sh host --terminal kitty` (recommended)
 
-Use this when you want the normal recommended setup.
+Use this for your daily machine setup.
 
 What happens:
-- host gets a lightweight Zenith CLI
-- Podman container gets the heavy runtime and AI tools
-- default container GPU mode is `auto`, so Zenith tries NVIDIA passthrough when the host runtime is already available
-- no host `sudo` package provisioning
+- installs Zenith CLI on the host
+- installs all core tools (`zsh`, `zellij`, `yazi`, `eza`, `bat`, `starship`, `zoxide`, `fzf`, `ripgrep`, `btop`, `fastfetch`) via the system package manager with `sudo`
+- installs Kitty terminal in user space
+- deploys zsh fragment, starship config, kitty config, zsh plugins
+- sets up `ai` and `fix` shell shortcuts
+
+### `./bootstrap.sh host --fresh --terminal kitty`
+
+Clean reinstall of the host setup. Removes existing Zenith artifacts first, then reinstalls everything from scratch.
+
+### `./bootstrap.sh` (hybrid mode)
+
+Use this when you want Ollama running in an isolated Podman container with GPU passthrough and a lightweight host.
+
+Host gets:
+- the lightweight `zen` CLI and launcher only
+
+Container gets:
+- `ollama`, heavy runtime tools, AI models
+- `zen workspace` sessions via Zellij
 
 ### `./bootstrap.sh --gpu nvidia`
 
-Use this when you want the normal recommended setup and you want Zenith to require NVIDIA GPU passthrough for the Podman container.
+Hybrid mode with required NVIDIA GPU passthrough for the Podman container.
 
 What happens:
-- everything from the normal hybrid setup happens
-- Zenith launches the container with `--gpus all`
-- Zenith also adds Podman hooks from the configured hooks directory when that directory exists
-- bootstrap fails early if you explicitly requested `nvidia` but the host does not expose `nvidia-smi`
-- Zenith still does not install the host NVIDIA container toolkit for you
+- everything from the hybrid setup happens
+- Zenith launches the container with `--device nvidia.com/gpu=all`
+- bootstrap fails early if `nvidia-smi` is not available on the host
+- Ollama GPU libraries (`~/.local/lib/ollama`) are deployed so GPU backends load correctly
 
 ### `./bootstrap.sh --gpu none`
 
-Use this when you want to force CPU-only container AI even on a GPU host.
+Force CPU-only container AI even on a GPU host.
+
+### `./bootstrap.sh --terminal kitty` (hybrid + surface)
+
+Hybrid mode plus a host Kitty install.
 
 What happens:
-- everything from the normal hybrid setup happens
-- Zenith launches the Podman container without GPU passthrough
-
-### `./bootstrap.sh --terminal kitty`
-
-Use this when you want the normal recommended setup and also want Zenith to try to install that host terminal for you in user space.
-
-What happens:
-- everything from the normal hybrid setup happens
-- Zenith attempts a host user-space install for the requested terminal
-- for Kitty on Linux, Zenith uses the official user-space installer
-- for Ghostty on Linux, Zenith uses the official source-build path and bootstraps the required Zig version into user space when it can
-- Zenith records that terminal name for later host-side `surface` work
-- no host package-manager changes happen just because you set the terminal name
+- everything from the hybrid setup happens
+- Zenith installs Kitty in user space and deploys terminal config
 
 ### `./bootstrap.sh fresh`
 
-Use this when you want a true clean reinstall of the recommended setup.
-
-What happens:
-- runs `./teardown.sh clean` for the hybrid setup
-- reinstalls the same hybrid layout from scratch
+Clean reinstall of the hybrid setup.
 
 ### `./bootstrap.sh container`
 
-Use this when you only want the container side.
+Container side only, no host Zenith install.
 
-What happens:
-- no host Zenith install beyond this repo checkout
-- Podman container gets the heavy runtime and AI tools
+### `./teardown.sh`
 
-### `./bootstrap.sh host`
+Removes the full hybrid setup.
 
-Use this only when you want Zenith to live directly on the host.
+### `./teardown.sh host`
 
-What happens:
-- installs Zenith on the host itself
-- stays in your user space only
-- does not use `sudo`
-- does not make host package-manager changes
-- bootstraps only the host tools Zenith can manage locally
-- attempts a user-space install of the chosen terminal when Zenith knows how
-- records and applies host-native surface assets for the chosen terminal when Zenith ships them
-
-### `./teardown.sh clean`
-
-Use this when you want Zenith removed.
-
-What happens:
-- removes Zenith-owned host config, state, and shims
-- removes Zenith Podman container, image, and volumes
-- removes fallback binaries Zenith bootstrapped
+Removes host Zenith only. Cleans up:
+- Zenith config and state directories
+- shell fragment source hooks from `.zshrc` and `.bashrc`
+- system packages installed by Zenith (via `sudo dnf remove`)
+- user-space binaries (`~/.local/bin/zen`, `~/.local/bin/kitty`, etc.)
+- zsh plugins (`~/.local/share/zsh-plugins/`)
+- caches (`~/.cache/starship`, `~/.cache/zoxide`, `~/.local/share/zoxide`)
+- zsh completion dumps (`~/.zcompdump*`)
 
 ## What goes where
 
-### Host in hybrid mode
+### Host (daily driver)
 
-These are the kinds of things that belong on the host in the recommended setup:
-- the `zen` launcher
-- lightweight Python package install for Zenith itself
-- user-owned host config and state helpers
-- repo checkout
+- all shell tools: `eza`, `bat`, `fzf`, `ripgrep`, `zoxide`, `btop`, `starship`, `zsh`
+- terminal: Kitty (`~/.local/kitty.app`)
+- shell config: `~/.config/zenith/zenith.zshrc`, zsh plugins
+- prompt: `~/.config/starship.toml`
+- `ai` and `fix` shortcuts in every shell session
+- the `zen` CLI launcher
 
-### Container in hybrid mode
+### Container (AI compute only)
 
-These are the kinds of things that belong in the container in the recommended setup:
-- `ollama`
-- Ollama models
-- `zellij`
-- `yazi`
-- `starship`
-- other heavy shell and AI runtime tools
-- workspace and AI execution runtime
+- `ollama` and the AI model (`qwen2.5-coder:7b`)
+- GPU passthrough via CDI
+- `zen workspace` focused sessions (Zellij)
+- Ollama GPU libraries at `~/.local/lib/ollama`
 
 ### Host-only by design
 
-These belong on the host and are not part of the normal container path:
-- `surface`
-- terminal config
-- shaders
+- Kitty terminal config and surface assets
+- Ghostty shaders
 - GUI/session integration
-
-## User-space host truth
-
-Zenith now follows a simple rule on the host:
-
-- no `sudo`
-- no host package-manager changes
-- no pretending a host binary was installed when Zenith only wrote config
-
-That means host-side `surface` setup is about user-space config, terminal bootstraps, and assets. If your chosen terminal binary is missing and Zenith does not ship a local bootstrap for it, Zenith fails clearly and tells you that directly.
 
 ## GPU note
 
-If AI feels slow, the first question is where Ollama is running.
+If AI feels slow:
 
-- In hybrid mode, Ollama normally runs in the container.
-- If that container does not have GPU passthrough, Ollama will run on CPU.
-- `zen doctor` and `zen status --json` can now show whether Ollama is using GPU or CPU.
-
-If you want GPU-backed AI, you need one of these:
-- Podman container with real GPU passthrough via `./bootstrap.sh --gpu nvidia` or `ZENITH_CONTAINER_GPU=nvidia`
-- or a host Ollama endpoint with Zenith pointed at it explicitly
+- run `zen doctor` or `zen status --json` to confirm whether Ollama is using GPU or CPU
+- in hybrid mode, Ollama runs in the container — use `./bootstrap.sh --gpu nvidia` to enable passthrough
+- GPU libraries must be present at `~/.local/lib/ollama/` for Ollama to find its CUDA backend; these are deployed automatically by `zen install core` when bootstrapping Ollama from a release archive
+- `num_gpu = 99` in config ensures all available GPU layers are used

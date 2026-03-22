@@ -21,7 +21,7 @@ flowchart TD
     C --> C4[Status / doctor / rollback]
     C --> C5[Local XDG state]
 
-    S --> S1[Ghostty config]
+    S --> S1[Kitty / Ghostty config]
     S --> S2[Shaders / orbit themes]
     S --> S3[Fonts]
     S --> S4[GUI session integration]
@@ -39,7 +39,7 @@ flowchart TD
 flowchart LR
     subgraph Host
         H1[GUI session]
-        H2[Ghostty]
+        H2[Kitty / Ghostty]
         H3[Fonts / shaders]
         H4[~/.config/zenith]
         H5[~/.local/share/zenith]
@@ -107,13 +107,13 @@ flowchart TD
     Q1 -- Yes --> HOST[Host install]
     Q1 -- No --> COREONLY[Container core install]
 
-    HOST --> H1[zen install all --mode host --yes]
+    HOST --> H1[zen install all --mode host --packages --yes]
     H1 --> H2[Core + Surface]
-    H2 --> H3[Ghostty + shell tooling + AI]
+    H2 --> H3[Kitty/Ghostty + shell tooling + AI]
 
     COREONLY --> C1[zen install core --mode container --yes]
     C1 --> C2[Shell tooling + workspace + AI]
-    C2 --> C3[No Ghostty surface]
+    C2 --> C3[No surface layer]
 
     HOST --> HYBRID{Also want isolated dev env?}
     HYBRID -- Yes --> BEST[Best overall setup]
@@ -187,6 +187,6 @@ flowchart LR
 
 Best practical choices:
 
-- Want the nicest terminal UX: use host `surface`
-- Want isolation and resettable tooling: use container `core`
-- Want the strongest overall setup: host `surface` plus container `core`
+- Want everything on your machine with the nicest terminal UX: use **host mode** (`./bootstrap.sh host --terminal kitty`)
+- Want isolation and resettable AI/tooling: use **hybrid mode** — lightweight host CLI plus container core
+- Want isolation only, no host install: use **container-only mode** (`./bootstrap.sh container`)

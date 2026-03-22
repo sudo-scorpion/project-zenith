@@ -8,56 +8,68 @@ Zenith supports three install targets:
 - `zen install surface`
 - `zen install all`
 
-Core is the safe baseline. Surface is optional and host-only.
+Core is the baseline. Surface is optional and host-only.
 
 ## Plain-English setup map
 
-If you want the short human explanation:
-
-- `./bootstrap.sh`: recommended hybrid mode, with lightweight host CLI and heavy runtime tools in the container
-- `./bootstrap.sh --gpu nvidia`: same setup, but require NVIDIA GPU passthrough in the Podman container
-- `./bootstrap.sh fresh`: wipe the recommended setup and rebuild it from scratch
-- `./bootstrap.sh host`: put Zenith directly on the host in user space only
-- `./bootstrap.sh container`: only prepare the container side
+```bash
+./bootstrap.sh host --terminal kitty        # recommended: everything on your host
+./bootstrap.sh host --fresh --terminal kitty # clean reinstall on your host
+./bootstrap.sh                               # hybrid: lightweight host + Podman container for AI
+./bootstrap.sh --gpu nvidia                  # hybrid with NVIDIA GPU passthrough in container
+./bootstrap.sh fresh                         # wipe hybrid setup and rebuild from scratch
+./bootstrap.sh container                     # container side only
+```
 
 For a fuller scenario guide, read [Deployment guide](deployment.md). For tunables and records, read [Settings and visibility](settings.md).
 
 ## Package-manager behavior
 
-Zenith now keeps a strict split:
+Zenith has two modes for host package installs:
 
-- container mode may use the container package manager because that work stays inside the container
-- host mode does not use `sudo` and does not make host package-manager changes
-- host-side bootstraps only happen when Zenith can manage them in user space
+**Without `--packages`** (default for `zen install core`):
+- skips system package manager on the host
+- only bootstraps tools Zenith can manage in user space (zellij, yazi, starship, ollama from release archives)
+- no `sudo`
 
-That means host mode is intentionally honest: if a host-side binary is missing and Zenith does not have a local bootstrap for it, Zenith tells you plainly instead of trying to elevate privileges.
+**With `--packages`** (automatic when using `./bootstrap.sh host`):
+- installs all core tools via the system package manager with `sudo`
+- on Fedora: `sudo dnf install zsh zellij yazi eza bat starship zoxide fzf ripgrep btop fastfetch ollama`
+- all installed packages are tracked in the Zenith manifest for clean uninstall
+
+In container mode, the container package manager runs as root — no sudo needed.
 
 ## Shell support
 
 Zenith installs shell integration for:
 
+- `zsh` (default)
 - `bash`
-- `zsh`
 
 Use `--shell bash|zsh` during install, or let Zenith default to the current `SHELL` when it is supported.
 
 ## Core install
 
 ```bash
-zen install core --yes
+zen install core --yes                        # auto-detect shell, no system packages
+zen install core --packages --yes             # also install system packages via sudo
 zen install core --shell zsh --yes
 ```
 
 Core install writes or manages:
 
 - `~/.config/zenith/zenith.toml`
-- `~/.config/zenith/zenith.bashrc` or `~/.config/zenith/zenith.zshrc`
-- `~/.local/bin/zen`
-- `~/.local/bin/zenith`
+- `~/.config/zenith/zenith.zshrc` or `~/.config/zenith/zenith.bashrc`
+- `~/.local/bin/zen` and `~/.local/bin/zenith`
+- `~/.config/starship.toml`
+- `~/.config/zellij/layouts/zenith.kdl` and `~/.config/zellij/config.kdl`
+- `~/.local/share/zsh-plugins/zsh-autosuggestions`
+- `~/.local/share/zsh-plugins/zsh-syntax-highlighting`
+- `~/.local/lib/ollama/` — GPU backend libraries for Ollama (when bootstrapping from release)
 - prompt overrides under `~/.config/zenith/prompts/`
 - state capture files under `~/.config/zenith/state/`
-- Starship and Zellij assets
 - a manifest under `~/.local/share/zenith/manifests/`
+- `ai` and `fix` shell function shortcuts (sourced via the shell fragment)
 
 Existing managed files are backed up before Zenith rewrites them.
 
@@ -67,48 +79,41 @@ Existing managed files are backed up before Zenith rewrites them.
 zen install surface --mode host --terminal kitty --yes
 ```
 
-Surface requires:
+Surface requires resolved host mode.
 
-- resolved host mode
-
-Surface install is user-space only. If no GUI session is active, Zenith still installs or verifies the terminal binary and records the preference, but it skips GUI-facing surface assets.
+Surface install is user-space only.
 
 What Zenith does:
 - records the chosen terminal name in Zenith config
 - attempts a user-space install for that terminal when Zenith knows how
-- installs built-in terminal assets only when Zenith ships them for that terminal
 - writes Kitty config under `~/.config/kitty/kitty.conf` when `terminal = kitty`
 - writes Ghostty config plus shader assets under `~/.config/ghostty` when `terminal = ghostty`
 
 What Zenith does not do:
 - use `sudo`
-- install host packages for you
+- install host packages
 - pretend a terminal binary was installed when it was not
 
 Current built-in user-space terminal bootstrap:
 - `kitty` on Linux, using the official Kitty installer into `~/.local/kitty.app` with launchers in `~/.local/bin`
 - `ghostty` on Linux, using the official Ghostty source-build path into `~/.local`
-- Zenith now bootstraps the required Zig version in user space automatically when it can
-- the remaining host-side prerequisites are GTK4, libadwaita, pkg-config/pkgconf, and gettext
 
 ## Install all
 
 ```bash
-zen install all --mode auto --yes
+zen install all --mode host --packages --yes
 ```
 
-`install all` always installs core first. In non-host modes, Zenith warns and skips the surface layer. In host mode, Zenith attempts the requested terminal bootstrap and fails clearly if that host terminal cannot be installed or verified.
+`install all` installs core first, then surface. The `--packages` flag enables system package manager installs. `./bootstrap.sh host` passes this automatically.
 
 ## Dry runs
 
 ```bash
 zen install core --dry-run --yes
-zen install all --mode container --dry-run --yes
+zen install all --mode host --packages --dry-run --yes
 ```
 
 Dry runs print the plan and package commands without writing config or manifest state.
-
-When `./bootstrap.sh` prepares a container, it runs `zen install core` in strict mode. If required container features such as `zellij`, `yazi`, `starship`, `ollama`, or the configured Ollama model cannot be provisioned, bootstrap stops instead of reporting a fake success. The default hybrid path keeps those heavy dependencies in the container.
 
 ## Uninstall and rollback
 
@@ -118,26 +123,22 @@ When `./bootstrap.sh` prepares a container, it runs `zen install core` in strict
 ## One-command cleanup
 
 ```bash
-./teardown.sh
+./teardown.sh host    # remove host Zenith
+./teardown.sh         # remove full hybrid setup
 ```
 
-Cleanup modes:
-
-- `./teardown.sh`: remove the recommended hybrid setup
-- `./teardown.sh host`: remove host Zenith only
-- `./teardown.sh container`: remove container artifacts only
-- `./teardown.sh clean`: alias for the default full cleanup
-
-`./teardown.sh` removes Zenith config/state, attempts package uninstall for the Python package, removes the persistent Podman container, drops the Zenith volumes, and removes the built Zenith image.
+`./teardown.sh host` removes:
+- Zenith config, state, and data directories
+- shell fragment hooks stripped from `.zshrc`, `.bashrc`, `.zprofile`, `.bash_profile`
+- system packages installed by Zenith (via `sudo dnf remove`)
+- user-space binaries in `~/.local/bin/`
+- zsh plugins at `~/.local/share/zsh-plugins/`
+- Ollama GPU libraries at `~/.local/lib/ollama/`
+- caches: `~/.cache/starship`, `~/.cache/zoxide`, `~/.local/share/zoxide`
+- zsh completion dumps: `~/.zcompdump*`
 
 ## One-command fresh reinstall
 
 ```bash
-./bootstrap.sh fresh
+./bootstrap.sh host --fresh --terminal kitty
 ```
-
-Fresh reset modes:
-
-- `./bootstrap.sh fresh`: clean reinstall of the recommended hybrid setup
-- `./bootstrap.sh host --fresh --terminal kitty`: clean reinstall of host Zenith only with an explicit surface terminal
-- `./bootstrap.sh container --fresh`: clean reinstall of container Zenith only

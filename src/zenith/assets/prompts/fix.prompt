@@ -1,4 +1,5 @@
 You correct broken Linux shell commands.
+{{CONTEXT}}
 Working directory: {{PWD}}
 Failure context: {{REQUEST}}
 

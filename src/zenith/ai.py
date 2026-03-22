@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import shlex
 import subprocess
 import urllib.error
 import urllib.request
@@ -10,24 +11,113 @@ from pathlib import Path
 
 from .assets import read_asset_text
 from .binaries import resolve_binary, with_local_bin_path
-from .models import AIResult, Paths, ResolvedConfig
+from .models import AIResult, Paths, ResolvedConfig, TaskContext
 from .shells import shell_history_path
 
 SAFE_PREFIXES = (
+    # navigation / listing
     "pwd",
     "ls",
     "eza",
-    "grep",
-    "rg",
+    "lsd",
+    "tree",
     "find",
+    # output
+    "echo",
+    "printf",
+    "print",
+    # file reading
     "cat",
     "bat",
+    "head",
+    "tail",
+    "less",
+    "more",
+    "file",
+    "stat",
+    "wc",
+    # search
+    "grep",
+    "rg",
+    "ag",
+    "cut",
+    "sort",
+    "uniq",
+    "diff",
+    "cmp",
+    # system info (read-only)
+    "df",
+    "du",
+    "free",
+    "ps",
+    "uptime",
+    "uname",
+    "whoami",
+    "id",
+    "hostname",
+    "date",
+    "cal",
+    "env",
+    "printenv",
+    "which",
+    "type",
+    "command",
+    "man",
+    "help",
+    "history",
+    "lsof",
+    "ss",
+    "ip addr",
+    "ip link",
+    "ip route",
+    "ip neigh",
+    "ip -s",
+    "ifconfig",
+    "ping",
+    "traceroute",
+    "nslookup",
+    "dig",
+    "host",
+    # hash / checksum
+    "md5sum",
+    "sha1sum",
+    "sha256sum",
+    "sha512sum",
+    # data tools
+    "jq",
+    "yq",
+    "column",
+    "xargs",
+    # archives (extract only)
+    "tar -x",
+    "tar -t",
+    "unzip",
+    "unrar",
+    "7z l",
+    "7z x",
+    # git (read-only)
     "git status",
     "git log",
     "git show",
     "git diff",
-    "tar -x",
-    "unzip",
+    "git branch",
+    "git tag",
+    "git remote",
+    "git stash list",
+    "git describe",
+    "git rev-parse",
+    # process / job
+    "jobs",
+    "fg",
+    "bg",
+    "wait",
+    # misc utilities
+    "locale",
+    "ldd",
+    "nm",
+    "strings",
+    "xxd",
+    "od",
 )
 REVIEW_PREFIXES = (
     "sudo",
@@ -44,11 +134,33 @@ REVIEW_PREFIXES = (
     "chown",
     "mv",
     "cp",
-    "sed -i",
+    "sed",
+    "awk",
+    "tr",
     "tee",
     "touch",
+    "curl",
+    "wget",
 )
-BLOCKED_MARKERS = ("rm -rf", "mkfs", "fdisk", "iptables", "ufw", "| sh", "| bash", "curl ", "wget ")
+BLOCKED_MARKERS = (
+    "rm -rf",
+    "rm -r ",
+    "rm --recursive",
+    "mkfs",
+    "fdisk",
+    "iptables",
+    "ufw",
+    "| sh",
+    "| bash",
+    "| zsh",
+    "| python",
+    "| perl",
+    "dd if=",
+    "shred",
+    "> /dev/",
+    "chmod 777",
+    "chmod -R 777",
+)
 COMMAND_SCHEMA = {
     "type": "object",
     "properties": {
@@ -59,36 +171,77 @@ COMMAND_SCHEMA = {
 }
 
 
-def _prompt_text(paths: Paths, name: str) -> str:
+def prompt_text(paths: Paths, name: str) -> str:
     local = paths.prompt_dir / f"{name}.prompt"
     if local.exists():
         return local.read_text(encoding="utf-8")
     return read_asset_text("prompts", f"{name}.prompt")
 
 
-def _classify(command: str) -> tuple[str, bool, str]:
+def _has_write_flags(command: str, write_flags: tuple[str, ...]) -> bool:
+    """Check if a command string contains any of the specified write flags."""
+    parts = command.strip().split()
+    return any(flag in parts for flag in write_flags)
+
+
+def classify_command(command: str) -> tuple[str, bool, str]:
     lowered = command.strip().lower()
     if any(marker in lowered for marker in BLOCKED_MARKERS):
         return "blocked", True, "This command is high risk and blocked from direct execution in Zenith V1."
     if lowered.startswith(SAFE_PREFIXES):
         return "safe", False, "Read-oriented or low-impact command."
+    # Smart classification for curl/wget: read-only usage is safe
+    if lowered.startswith(("curl", "wget")):
+        curl_write_flags = ("-o", "--output", "-O", "--remote-name", "-T", "--upload-file", "--data", "-d", "--post")
+        wget_write_flags = ("-O", "--output-document", "-P", "--directory-prefix")
+        flags = curl_write_flags if lowered.startswith("curl") else wget_write_flags
+        if not _has_write_flags(command, flags):
+            return "safe", False, "Read-only network request."
     if lowered.startswith(REVIEW_PREFIXES):
-        return "review", True, "This command can change packages, services, permissions, or files and should be reviewed."
-    return "review", True, "This command should be reviewed before execution."
+        return "review", True, "This command can change packages, services, permissions, or files — review before running."
+    return "review", True, "Unrecognized command — review before running."
 
 
 def _normalize_command(output: str) -> str:
-    return output.strip().replace("```bash", "").replace("```", "").strip()
+    return output.strip().replace("```bash", "").replace("```sh", "").replace("```", "").strip()
+
+
+def _command_from_text(response_text: str) -> str:
+    cleaned = _normalize_command(response_text)
+    if not cleaned:
+        return ""
+
+    json_match = re.search(r'"command"\s*:\s*"([^"]+)"', cleaned)
+    if json_match:
+        return _normalize_command(json_match.group(1))
+
+    lines = [line.strip() for line in cleaned.splitlines() if line.strip()]
+    for line in lines:
+        lowered = line.lower()
+        for prefix in ("command:", "shell command:", "run:", "answer:"):
+            if lowered.startswith(prefix):
+                line = line.split(":", 1)[1].strip()
+                break
+        if line:
+            return _normalize_command(line)
+    return cleaned
+
+
+_KIND_TO_TASK = {"nav": "ask", "fix": "fix", "agent": "agent"}
 
 
 def _ai_model_for(config: ResolvedConfig, kind: str) -> str:
+    task = _KIND_TO_TASK.get(kind, kind)
+    models_table = config.ai.get("models", {})
+    if isinstance(models_table, dict) and models_table.get(task, "").strip():
+        return str(models_table[task]).strip()
     lookup = "ask_model" if kind == "nav" else f"{kind}_model"
     specific = str(config.ai.get(lookup, "")).strip()
     if not specific and kind == "nav":
         specific = str(config.ai.get("nav_model", "")).strip()
     if specific:
         return specific
-    return str(config.ai.get("model", "qwen3.5:4b"))
+    return str(config.ai.get("model", "qwen2.5-coder:7b"))
 
 
 def _ollama_host(config: ResolvedConfig) -> str:
@@ -121,21 +274,16 @@ def _structured_output_enabled(config: ResolvedConfig) -> bool:
 
 def _extract_command(response_text: str, structured_output: bool) -> str:
     if not structured_output:
-        return _normalize_command(response_text)
+        return _command_from_text(response_text)
     try:
         payload = json.loads(response_text)
     except json.JSONDecodeError:
-        return _normalize_command(response_text)
+        return _command_from_text(response_text)
     command = payload.get("command", "") if isinstance(payload, dict) else ""
     return _normalize_command(str(command))
 
 
-def _ollama_generate(config: ResolvedConfig, kind: str, prompt: str) -> str:
-    ollama = resolve_binary("ollama")
-    if not ollama:
-        raise SystemExit("ollama is not installed")
-
-    structured_output = _structured_output_enabled(config)
+def _ollama_request(config: ResolvedConfig, kind: str, prompt: str, structured_output: bool) -> dict[str, object]:
     body: dict[str, object] = {
         "model": _ai_model_for(config, kind),
         "prompt": prompt,
@@ -160,12 +308,64 @@ def _ollama_generate(config: ResolvedConfig, kind: str, prompt: str) -> str:
         raise SystemExit(f"ollama generate failed: {detail or exc.reason}") from exc
     except urllib.error.URLError as exc:
         raise SystemExit(f"unable to reach ollama at {_ollama_host(config)}") from exc
+    if not isinstance(payload, dict):
+        return {}
+    return payload
 
-    response_text = str(payload.get("response", "")).strip()
+
+def ollama_generate(config: ResolvedConfig, kind: str, prompt: str) -> str:
+    ollama = resolve_binary("ollama")
+    if not ollama:
+        raise SystemExit("ollama is not installed")
+
+    structured_output = _structured_output_enabled(config)
+    payload = _ollama_request(config, kind, prompt, structured_output)
+    response_text = str(payload.get("response") or payload.get("message", {}).get("content", "")).strip()
     command = _extract_command(response_text, structured_output)
-    if not command:
-        raise SystemExit("ollama did not return a command")
-    return command
+    if command:
+        return command
+    if structured_output:
+        payload = _ollama_request(config, kind, prompt, False)
+        response_text = str(payload.get("response") or payload.get("message", {}).get("content", "")).strip()
+        command = _extract_command(response_text, False)
+        if command:
+            return command
+    snippet = _normalize_command(response_text)[:160]
+    raise SystemExit(f"ollama did not return a command: {snippet or 'empty response'}")
+
+
+def ollama_generate_structured(config: ResolvedConfig, kind: str, prompt: str, schema: dict) -> dict:
+    """Call Ollama and return the parsed JSON response matching schema. Raises SystemExit on failure."""
+    ollama = resolve_binary("ollama")
+    if not ollama:
+        raise SystemExit("ollama is not installed")
+    body: dict[str, object] = {
+        "model": _ai_model_for(config, kind),
+        "prompt": prompt,
+        "stream": False,
+        "keep_alive": config.ai.get("keep_alive", "15m"),
+        "options": _ollama_options(config),
+        "format": schema,
+    }
+    request = urllib.request.Request(
+        f"{_ollama_host(config)}/api/generate",
+        data=json.dumps(body).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=_ollama_timeout(config)) as response:
+            payload = json.load(response)
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace").strip()
+        raise SystemExit(f"ollama generate failed: {detail or exc.reason}") from exc
+    except urllib.error.URLError as exc:
+        raise SystemExit(f"unable to reach ollama at {_ollama_host(config)}") from exc
+    response_text = str(payload.get("response") or "").strip()
+    try:
+        return json.loads(response_text)
+    except json.JSONDecodeError as exc:
+        raise SystemExit(f"ollama returned invalid JSON: {response_text[:120]}") from exc
 
 
 def ollama_runtime_details() -> dict[str, str]:
@@ -205,11 +405,26 @@ def _log(paths: Paths, kind: str, request: str, result: AIResult) -> None:
         handle.write(line + "\n")
 
 
-def _result_for(paths: Paths, config: ResolvedConfig, kind: str, request: str, *, cwd: Path | None = None) -> AIResult:
+def _result_for(
+    paths: Paths,
+    config: ResolvedConfig,
+    kind: str,
+    request: str,
+    *,
+    cwd: Path | None = None,
+    ctx: TaskContext | None = None,
+) -> AIResult:
+    from .context import format_context_for_prompt
     working_dir = cwd or Path.cwd()
-    prompt = _prompt_text(paths, kind).replace("{{PWD}}", str(working_dir)).replace("{{REQUEST}}", request)
-    command = _ollama_generate(config, kind, prompt)
-    risk, requires_confirmation, explanation = _classify(command)
+    ctx_block = format_context_for_prompt(ctx) if ctx else ""
+    prompt = (
+        prompt_text(paths, kind)
+        .replace("{{PWD}}", str(working_dir))
+        .replace("{{REQUEST}}", request)
+        .replace("{{CONTEXT}}", ctx_block)
+    )
+    command = ollama_generate(config, kind, prompt)
+    risk, requires_confirmation, explanation = classify_command(command)
     result = AIResult(
         intent=request,
         command=command,
@@ -278,7 +493,9 @@ def _latest_history_command(paths: Paths, shell: str) -> str:
 def ask(paths: Paths, config: ResolvedConfig, request: str) -> AIResult:
     if not request.strip():
         raise SystemExit('Usage: zen ask "<request>"')
-    return _result_for(paths, config, "nav", request)
+    from .context import load_context
+    ctx = load_context(paths)
+    return _result_for(paths, config, "nav", request, ctx=ctx)
 
 
 def nav(paths: Paths, config: ResolvedConfig, request: str) -> AIResult:
@@ -286,10 +503,15 @@ def nav(paths: Paths, config: ResolvedConfig, request: str) -> AIResult:
 
 
 def fix(paths: Paths, config: ResolvedConfig) -> AIResult:
+    from .context import load_context, push_error
+    ctx = load_context(paths)
     context = read_fix_context(paths)
     if context["command"]:
         if context["exit_status"] == 0 and not context["stderr"]:
             raise SystemExit("No failed command context captured yet")
+        if context["stderr"]:
+            push_error(paths, str(context["stderr"]))
+            ctx = load_context(paths)
         request_lines = [
             f"Previous command: {context['command']}",
             f"Working directory: {context['pwd'] or Path.cwd()}",
@@ -297,13 +519,15 @@ def fix(paths: Paths, config: ResolvedConfig) -> AIResult:
             f"stderr: {context['stderr'] or 'No stderr was captured.'}",
             "Suggest a corrected replacement command.",
         ]
-        return _result_for(paths, config, "fix", "\n".join(request_lines), cwd=Path(context["pwd"] or Path.cwd()))
+        return _result_for(paths, config, "fix", "\n".join(request_lines), cwd=Path(context["pwd"] or Path.cwd()), ctx=ctx)
 
     last_command = _latest_history_command(paths, config.shell)
     if not last_command:
         raise SystemExit("No shell history or shell failure context available to inspect")
+    from .logging_utils import note
+    note("No failure context captured — using last shell history entry as context.")
     request = f"Previous command: {last_command}\nNo captured stderr was available. Suggest a corrected replacement command."
-    return _result_for(paths, config, "fix", request)
+    return _result_for(paths, config, "fix", request, ctx=ctx)
 
 
 def render_result(result: AIResult, as_json: bool) -> str:
@@ -321,11 +545,30 @@ def render_result(result: AIResult, as_json: bool) -> str:
 
 
 def maybe_execute(result: AIResult, execute: bool) -> int:
-    if not execute:
+    """Prompt the user to execute the generated command.
+
+    - safe commands: execute immediately without prompting
+    - review commands: prompt, default N (must type y to run)
+    - blocked commands: refuse
+    """
+    if result.risk == "blocked":
         return 0
+
     if result.risk != "safe":
-        raise SystemExit("Refusing to auto-execute non-safe command")
-    answer = input("Execute generated safe command? [y/N] ").strip().lower()
-    if answer != "y":
-        return 0
-    return subprocess.run(result.command, shell=True, check=False, env=with_local_bin_path()).returncode
+        prompt = f"\033[33m⚠ Review — execute?\033[0m [y/N] "
+        try:
+            answer = input(prompt).strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return 0
+        if answer != "y":
+            return 0
+
+    _SHELL_METACHAR = re.compile(r"(?<![\\])[|><&;`$()]")
+    try:
+        tokens = shlex.split(result.command)
+    except ValueError:
+        tokens = None
+    if tokens is None or _SHELL_METACHAR.search(result.command):
+        return subprocess.run(result.command, shell=True, check=False, env=with_local_bin_path()).returncode
+    return subprocess.run(tokens, shell=False, check=False, env=with_local_bin_path()).returncode

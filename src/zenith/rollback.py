@@ -21,7 +21,6 @@ def _restore_manifest(manifest: dict, dry_run: bool) -> None:
         target_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(backup_path, target_path)
         ok(f"Restored {target}")
-
     for created in reversed(manifest.get("files_created", [])):
         created_path = Path(created)
         if not created_path.exists():
@@ -29,10 +28,12 @@ def _restore_manifest(manifest: dict, dry_run: bool) -> None:
         if dry_run:
             ok(f"[dry-run] Would remove {created}")
             continue
-        if created_path.is_file() or created_path.is_symlink():
+        if created_path.is_dir():
+            shutil.rmtree(created_path, ignore_errors=True)
+            ok(f"Removed {created}")
+        elif created_path.is_file() or created_path.is_symlink():
             created_path.unlink(missing_ok=True)
             ok(f"Removed {created}")
-
 
 
 def rollback(paths: Paths, *, dry_run: bool = False, all_transactions: bool = False) -> None:
@@ -56,7 +57,6 @@ def rollback(paths: Paths, *, dry_run: bool = False, all_transactions: bool = Fa
     remaining = [path for path, _ in history if path not in removed_paths]
     rewrite_latest_manifest(paths, remaining[-1] if remaining else None)
     ok("Rollback complete")
-
 
 
 def uninstall(paths: Paths, *, dry_run: bool = False) -> None:

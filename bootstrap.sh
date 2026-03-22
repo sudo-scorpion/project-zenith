@@ -13,7 +13,6 @@ WORKSPACE_MOUNT="${ZENITH_WORKSPACE_MOUNT:-$ROOT_DIR}"
 HOSTNAME_NAME="${ZENITH_HOSTNAME:-zenith}"
 TERMINAL="${ZENITH_TERMINAL:-kitty}"
 CONTAINER_GPU="${ZENITH_CONTAINER_GPU:-auto}"
-PODMAN_HOOKS_DIR="${ZENITH_PODMAN_HOOKS_DIR:-/usr/share/containers/oci/hooks.d}"
 TERMINAL_REQUESTED=0
 PODMAN_GPU_ARGS=()
 GPU_STATUS_MSG=""
@@ -26,20 +25,19 @@ usage() {
   cat <<'HELP'
 Usage: ./bootstrap.sh [hybrid|host|container|fresh] [--fresh] [--terminal NAME] [--gpu auto|nvidia|none]
 
-Most users should just run:
-  ./bootstrap.sh
-
-That defaults to the recommended hybrid setup: lightweight host CLI plus a fully provisioned core container.
+Recommended setup — everything on your machine:
+  ./bootstrap.sh host --terminal kitty
 
 Modes:
-  hybrid    Install a lightweight host CLI and prepare a persistent core container
-  host      Install host Zenith in user space only on the host itself
+  host      (recommended) Install all tools on your host in user space — shell, AI, terminal, prompt
+  hybrid    Lightweight host CLI plus a persistent Podman container for Ollama AI
   container Build and prepare a persistent core container only
-  fresh     Remove the recommended hybrid setup first, then reinstall it
+  fresh     Remove the hybrid setup first, then reinstall it
 
 Options:
-  --terminal NAME      Attempt a host user-space install for the chosen terminal and record it as the preferred surface terminal
-  --gpu MODE           Container GPU mode: auto, nvidia, or none
+  --fresh              Remove existing Zenith artifacts before installing
+  --terminal NAME      Install the chosen terminal in user space and record it as the preferred surface terminal
+  --gpu MODE           Container GPU mode: auto, nvidia, or none (hybrid/container modes only)
 
 Environment overrides:
   ZENITH_PROFILE=safe|personal
@@ -50,13 +48,13 @@ Environment overrides:
   ZENITH_WORKSPACE_MOUNT=/path/to/workspace
   ZENITH_TERMINAL=kitty
   ZENITH_CONTAINER_GPU=auto|nvidia|none
-  ZENITH_PODMAN_HOOKS_DIR=/usr/share/containers/oci/hooks.d
 
-Fresh reset examples:
-  ./bootstrap.sh fresh
-  ./bootstrap.sh --gpu nvidia
-  ./bootstrap.sh host --fresh --terminal kitty
-  ./bootstrap.sh container --fresh --gpu none
+Examples:
+  ./bootstrap.sh host --terminal kitty          # recommended daily driver
+  ./bootstrap.sh host --fresh --terminal kitty  # clean reinstall
+  ./bootstrap.sh                                # hybrid: host CLI + container AI
+  ./bootstrap.sh --gpu nvidia                   # hybrid with NVIDIA GPU passthrough
+  ./bootstrap.sh fresh                          # wipe hybrid setup and rebuild
 HELP
 }
 
@@ -168,16 +166,16 @@ Zenith deployment plan
   case "$MODE" in
     hybrid)
       cat <<INFO
-Mode: hybrid
+Mode: hybrid (use 'host' for the recommended daily driver setup)
 Fresh reset: $([ "$FRESH" -eq 1 ] && printf yes || printf no)
 Preferred host surface terminal: $TERMINAL
 Container GPU mode: $CONTAINER_GPU
 
 Host:
-- install the lightweight Zenith CLI only
+- install the lightweight Zenith CLI launcher only
 - keep host changes local to your user account
-- do not install heavy AI or core runtime packages on the host
-- do not use sudo in this mode
+- AI runs inside the Podman container, not on the host
+- no sudo, no host package-manager changes
 INFO
       if [ "$TERMINAL_REQUESTED" -eq 1 ]; then
         printf -- '- attempt a user-space install of %s on the host
@@ -211,17 +209,18 @@ INFO
       ;;
     host)
       cat <<INFO
-Mode: host
+Mode: host (recommended)
 Fresh reset: $([ "$FRESH" -eq 1 ] && printf yes || printf no)
 Preferred surface terminal: $TERMINAL
 
 Host:
-- install Zenith on the host in user space only
-- keep host changes under your home directory
-- do not use sudo or make host package-manager changes
-- bootstrap only the tools Zenith can manage locally
-- attempt a user-space install of the chosen terminal when Zenith knows how
-- apply host-native surface assets for the chosen terminal when Zenith ships them
+- install all Zenith core tools via the system package manager (uses sudo)
+- install zsh, zellij, yazi, eza, bat, starship, zoxide, fzf, ripgrep, btop, fastfetch, ollama
+- install the configured AI model (qwen2.5-coder:7b) via Ollama on the host
+- deploy zsh config, starship prompt, fzf, and shell plugins to your home directory
+- install Kitty terminal in user space (~/.local/kitty.app)
+- make ai and fix shortcuts available in every shell session
+- keep everything under your home directory and user-owned paths
 
 Container:
 - not used in this mode
@@ -269,8 +268,14 @@ INFO
 
 install_host_minimal() {
   require_cmd python3
+  if ! python3 -c "import sys; assert sys.version_info >= (3, 11)" 2>/dev/null; then
+    printf '[error] Python 3.11 or higher is required. Found: %s\n' "$(python3 --version 2>&1)" >&2
+    exit 1
+  fi
   cd "$ROOT_DIR"
-  python3 -m pip install --no-cache-dir .
+  if ! python3 -m pip install --no-cache-dir . 2>/dev/null; then
+    python3 -m pip install --no-cache-dir --break-system-packages .
+  fi
 }
 
 install_requested_terminal() {
@@ -294,11 +299,52 @@ install_requested_terminal() {
 
 install_host_full() {
   install_host_minimal
-  python3 -m zenith.cli install all --mode host --profile "$PROFILE" --terminal "$TERMINAL" --yes
+  local terminal_args=()
+  if [ "$TERMINAL_REQUESTED" -eq 1 ]; then
+    terminal_args=(--terminal "$TERMINAL")
+  fi
+  python3 -m zenith.cli install all --mode host --profile "$PROFILE" "${terminal_args[@]}" --packages --yes
 }
 
 stop_container_if_running() {
-  podman stop "$CONTAINER_NAME" >/dev/null 2>&1 || true
+  stop_container_ollama
+  podman stop -t 30 "$CONTAINER_NAME" >/dev/null 2>&1 || true
+}
+
+stop_container_ollama() {
+  podman exec "$CONTAINER_NAME" python3 -c '
+import os
+import signal
+import time
+
+def iter_ollama_pids():
+    for entry in os.listdir("/proc"):
+        if not entry.isdigit():
+            continue
+        pid = int(entry)
+        if pid <= 1:
+            continue
+        try:
+            with open(f"/proc/{pid}/cmdline", "rb") as handle:
+                raw = handle.read().replace(b"\x00", b" ").decode("utf-8", "ignore").strip()
+        except OSError:
+            continue
+        if "ollama" in raw and "serve" in raw:
+            yield pid
+
+pids = sorted(set(iter_ollama_pids()))
+for pid in pids:
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+
+deadline = time.time() + 10
+while time.time() < deadline:
+    if not list(iter_ollama_pids()):
+        break
+    time.sleep(0.5)
+' >/dev/null 2>&1 || true
 }
 
 run_fresh_reset() {
@@ -328,12 +374,11 @@ configure_container_gpu() {
       ;;
   esac
 
-  PODMAN_GPU_ARGS+=(--gpus all)
-  if [ -d "$PODMAN_HOOKS_DIR" ]; then
-    PODMAN_GPU_ARGS+=(--hooks-dir "$PODMAN_HOOKS_DIR")
-    GPU_STATUS_MSG="NVIDIA GPU passthrough requested for the container via --gpus all and hooks from $PODMAN_HOOKS_DIR."
+  PODMAN_GPU_ARGS+=(--device nvidia.com/gpu=all --group-add keep-groups)
+  if [ -f /etc/cdi/nvidia.yaml ]; then
+    GPU_STATUS_MSG='NVIDIA GPU passthrough requested for the container via CDI (--device nvidia.com/gpu=all) with --group-add keep-groups for rootless access.'
   else
-    GPU_STATUS_MSG='NVIDIA GPU passthrough requested for the container via --gpus all. The Podman hooks directory was not found, so host NVIDIA container support may still be incomplete.'
+    GPU_STATUS_MSG='NVIDIA GPU passthrough requested for the container via CDI (--device nvidia.com/gpu=all) with --group-add keep-groups, but /etc/cdi/nvidia.yaml was not found, so host NVIDIA CDI setup may still be incomplete.'
   fi
   return 0
 }
@@ -353,10 +398,10 @@ prepare_container() {
   podman volume inspect "$DATA_VOLUME" >/dev/null 2>&1 || podman volume create "$DATA_VOLUME" >/dev/null
   podman rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
 
-  create_args=(create -it
+  create_args=(create
     --name "$CONTAINER_NAME"
     --hostname "$HOSTNAME_NAME"
-    --entrypoint bash
+    --entrypoint sleep
     --security-opt label=disable
   )
   if [ "${#PODMAN_GPU_ARGS[@]}" -gt 0 ]; then
@@ -368,6 +413,7 @@ prepare_container() {
     -v "$WORKSPACE_MOUNT:/workspace"
     -w /workspace
     "$IMAGE_NAME"
+    infinity
   )
 
   podman "${create_args[@]}" >/dev/null
@@ -381,17 +427,20 @@ Container validation:
 '
   podman exec "$CONTAINER_NAME" zen doctor
 
-  podman stop "$CONTAINER_NAME" >/dev/null
+  stop_container_if_running
   trap - RETURN
 
   cat <<INFO
 Container prepared.
 
 Daily use:
-  podman start -ai $CONTAINER_NAME
+  zen
 
-Extra shell into the running container:
-  podman exec -it $CONTAINER_NAME bash
+Direct container shell fallback:
+  zen shell
+
+Raw Podman fallback:
+  podman start -ai $CONTAINER_NAME
 INFO
 }
 
@@ -410,6 +459,21 @@ case "$MODE" in
     ;;
   host)
     install_host_full
+    cat <<INFO
+
+Setup complete.
+
+Daily use:
+  ai "what is my ip address"    -- turn plain English into a shell command
+  fix                           -- analyze the last failed command and suggest a fix
+  zen workspace                 -- open a focused Zellij session
+
+Visibility:
+  zen status --json
+  zen doctor
+  zen config show
+  ./probe.sh
+INFO
     ;;
   container)
     prepare_container

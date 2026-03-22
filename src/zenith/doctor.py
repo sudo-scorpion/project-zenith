@@ -35,7 +35,13 @@ def _missing_core_tools() -> list[str]:
 
 
 def doctor_report(paths: Paths, config: ResolvedConfig, env: EnvironmentInfo) -> list[dict[str, str]]:
-    model = str(config.ai.get("model", "qwen3.5:4b"))
+    _default_model = str(config.ai.get("model", "qwen2.5-coder:7b"))
+    _task_models: dict[str, str] = {}
+    for _task, _key in (("ask", "ask_model"), ("fix", "fix_model"), ("agent", "agent_model")):
+        _m = str(config.ai.get(_key, "")).strip() or _default_model
+        _task_models[_task] = _m
+    # Primary model for backward-compat checks below
+    model = _default_model
     missing_tools = _missing_core_tools()
     workspace = workspace_status(config)
     surface = surface_status(paths, config)
@@ -45,15 +51,22 @@ def doctor_report(paths: Paths, config: ResolvedConfig, env: EnvironmentInfo) ->
     manifest_timestamp = latest_manifest_timestamp(paths)
     shell_available = binary_available(config.shell)
 
+    # Container check: only WARN if we're unexpectedly inside a container while
+    # the resolved mode is "host". Being in a container in "container" mode is normal.
+    container_level = "PASS"
+    if env.container and env.resolved_mode == "host":
+        container_level = "WARN"
+    container_detail = f"{env.container_runtime} container" if env.container else "host environment"
+
     report = [
         {"level": "PASS", "item": "distro", "detail": f"{env.distro} {env.version}"},
         {"level": "PASS" if env.package_manager != "unknown" else "WARN", "item": "package_manager", "detail": env.package_manager},
         {"level": "PASS", "item": "mode", "detail": env.resolved_mode},
-        {"level": "WARN" if env.container else "PASS", "item": "container", "detail": "Container environment detected" if env.container else "Host environment"},
-        {"level": "PASS", "item": "container_runtime", "detail": env.container_runtime},
-        {"level": "PASS" if env.distrobox else "WARN", "item": "distrobox", "detail": "Distrobox markers detected" if env.distrobox else "No distrobox markers detected"},
+        {"level": container_level, "item": "container", "detail": container_detail},
+        {"level": "PASS", "item": "distrobox", "detail": "distrobox" if env.distrobox else "standard"},
         {"level": "PASS" if env.gui else "WARN", "item": "gui", "detail": "GUI session detected" if env.gui else "No GUI session detected"},
         {"level": "PASS" if env.systemd else "WARN", "item": "systemd", "detail": "systemctl available" if env.systemd else "systemctl unavailable"},
+        {"level": "PASS" if env.gpu_tools else "WARN", "item": "gpu", "detail": "GPU device detected" if env.gpu_tools else "No GPU device detected"},
         {"level": "PASS" if shell_available else "FAIL", "item": "shell", "detail": f"{config.shell} available" if shell_available else f"{config.shell} missing"},
         {"level": "PASS" if shell_integration == "configured" else "WARN", "item": "shell_integration", "detail": shell_integration},
         {"level": "PASS" if not missing_tools else "WARN", "item": "core_tools", "detail": "all present" if not missing_tools else f"missing: {', '.join(missing_tools)}"},
@@ -71,17 +84,21 @@ def doctor_report(paths: Paths, config: ResolvedConfig, env: EnvironmentInfo) ->
     upgrade_status = str(surface_upgrade.get("status", "unknown"))
     upgrade_detail = str(surface_upgrade.get("message", "No surface upgrade data available"))
     upgrade_level = "PASS"
-    if upgrade_status == "upgrade-available" or upgrade_status == "install-available":
+    if upgrade_status in {"upgrade-available", "install-available"}:
         upgrade_level = "WARN"
     report.append({"level": upgrade_level, "item": "surface_upgrade", "detail": upgrade_detail})
     ollama = resolve_binary("ollama")
     if ollama:
         result = subprocess.run([ollama, "list"], capture_output=True, text=True, check=False, env=with_local_bin_path())
-        has_model = model in result.stdout
-        report.append({"level": "PASS" if has_model else "WARN", "item": "model", "detail": f"{model} available" if has_model else f"{model} not available"})
+        listed = result.stdout
+        # Check each task model individually
+        for _task, _m in _task_models.items():
+            has_model = _m in listed
+            report.append({"level": "PASS" if has_model else "WARN", "item": f"model_{_task}", "detail": f"{_m} available" if has_model else f"{_m} not pulled"})
         runtime = ollama_runtime_details()
         if runtime["status"] == "running":
-            level = "PASS" if "GPU" in runtime["processor"].upper() else "WARN"
+            using_gpu = "GPU" in runtime["processor"].upper()
+            level = "PASS" if using_gpu else "WARN"
             detail = f"{runtime['processor']} ({runtime['model']}, ctx {runtime['context'] or 'unknown'})"
         elif runtime["status"] == "idle":
             level = "PASS"
@@ -94,7 +111,8 @@ def doctor_report(paths: Paths, config: ResolvedConfig, env: EnvironmentInfo) ->
             detail = runtime["status"]
         report.append({"level": level, "item": "ai_runtime", "detail": detail})
     else:
-        report.append({"level": "WARN", "item": "model", "detail": f"{model} not available"})
+        for _task, _m in _task_models.items():
+            report.append({"level": "WARN", "item": f"model_{_task}", "detail": f"{_m} not available (ollama missing)"})
         report.append({"level": "WARN", "item": "ai_runtime", "detail": "ollama unavailable"})
     return report
 

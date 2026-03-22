@@ -21,12 +21,12 @@ from .models import EnvironmentInfo, ManifestTransaction, Paths, ResolvedConfig
 from .shells import shell_fragment_path, shell_fragment_source, shell_hook, shell_rc_path
 
 CORE_PACKAGES = {
-    "dnf": ["zellij", "yazi", "eza", "bat", "starship", "zoxide", "fzf", "ripgrep", "btop", "fastfetch", "ollama"],
-    "pacman": ["zellij", "yazi", "eza", "bat", "starship", "zoxide", "fzf", "ripgrep", "btop", "fastfetch", "ollama"],
-    "apt": ["zellij", "yazi", "eza", "bat", "starship", "zoxide", "fzf", "ripgrep", "btop", "fastfetch", "ollama"],
-    "zypper": ["zellij", "yazi", "eza", "bat", "starship", "zoxide", "fzf", "ripgrep", "btop", "fastfetch", "ollama"],
-    "apk": ["zellij", "yazi", "eza", "bat", "starship", "zoxide", "fzf", "ripgrep", "btop", "fastfetch", "ollama"],
-    "brew": ["zellij", "yazi", "eza", "bat", "starship", "zoxide", "fzf", "ripgrep", "btop", "fastfetch", "ollama"],
+    "dnf": ["zsh", "zellij", "yazi", "eza", "bat", "starship", "zoxide", "fzf", "ripgrep", "btop", "fastfetch", "ollama"],
+    "pacman": ["zsh", "zellij", "yazi", "eza", "bat", "starship", "zoxide", "fzf", "ripgrep", "btop", "fastfetch", "ollama"],
+    "apt": ["zsh", "zellij", "yazi", "eza", "bat", "starship", "zoxide", "fzf", "ripgrep", "btop", "fastfetch", "ollama"],
+    "zypper": ["zsh", "zellij", "yazi", "eza", "bat", "starship", "zoxide", "fzf", "ripgrep", "btop", "fastfetch", "ollama"],
+    "apk": ["zsh", "zellij", "yazi", "eza", "bat", "starship", "zoxide", "fzf", "ripgrep", "btop", "fastfetch", "ollama"],
+    "brew": ["zsh", "zellij", "yazi", "eza", "bat", "starship", "zoxide", "fzf", "ripgrep", "btop", "fastfetch", "ollama"],
 }
 
 SURFACE_PACKAGES = {
@@ -251,7 +251,9 @@ def _is_root() -> bool:
 
 
 def _privilege_prefix(package_manager: str) -> list[str]:
-    return []
+    if package_manager == "brew":
+        return []
+    return [] if _is_root() else ["sudo"]
 
 
 def _package_commands(package_manager: str, packages: list[str]) -> list[list[str]]:
@@ -854,9 +856,9 @@ def _confirm(message: str, assume_yes: bool, dry_run: bool) -> None:
         raise SystemExit("Install canceled")
 
 
-def _install_packages(env: EnvironmentInfo, package_map: dict[str, list[str]], manifest: ManifestTransaction, dry_run: bool) -> None:
-    if env.resolved_mode == 'host':
-        note('Skipping host package-manager installs; Zenith is staying in user space on the host')
+def _install_packages(env: EnvironmentInfo, package_map: dict[str, list[str]], manifest: ManifestTransaction, dry_run: bool, *, allow_packages: bool = False) -> None:
+    if env.resolved_mode == 'host' and not allow_packages:
+        note('Skipping host package-manager installs; pass --packages to enable')
         return
     packages = package_map.get(env.package_manager)
     if not packages:
@@ -869,6 +871,7 @@ def _install_packages(env: EnvironmentInfo, package_map: dict[str, list[str]], m
         if dry_run:
             print('[dry-run]', ' '.join(command))
             continue
+        info(f"Installing {package} via {env.package_manager}...")
         result = _run_capture_silent(command)
         if result.returncode == 0:
             note(f"Installed {package} via {env.package_manager}")
@@ -1024,7 +1027,24 @@ def _install_from_release_archive(paths: Paths, env: EnvironmentInfo, tool: str,
 def _install_ollama_fallback(paths: Paths, env: EnvironmentInfo, manifest: ManifestTransaction, dry_run: bool) -> bool:
     if binary_available('ollama'):
         return True
-    return _install_from_release_archive(paths, env, 'ollama', manifest, dry_run)
+    if not _install_from_release_archive(paths, env, 'ollama', manifest, dry_run):
+        return False
+    # Ollama needs its CUDA/GPU backend libraries alongside the binary.
+    # The release archive ships lib/ollama/ with libggml-cuda.so etc.
+    # Copy that tree to ~/.local/lib/ollama/ so Ollama can find its GPU backends.
+    stage_dir = paths.cache_dir / 'ollama-stage'
+    src_lib = stage_dir / 'lib' / 'ollama'
+    dst_lib = paths.home / '.local' / 'lib' / 'ollama'
+    if src_lib.is_dir():
+        if dry_run:
+            ok(f'[dry-run] Would install Ollama GPU libraries to {dst_lib}')
+            return True
+        if dst_lib.exists():
+            shutil.rmtree(dst_lib, ignore_errors=True)
+        shutil.copytree(src_lib, dst_lib, symlinks=True)
+        manifest.files_created.append(str(dst_lib))
+        ok(f'Installed Ollama GPU libraries to {dst_lib}')
+    return True
 
 
 def _ollama_ready(ollama: str) -> bool:
@@ -1069,7 +1089,7 @@ def _has_ollama_model(ollama: str, model: str) -> bool:
 def _should_bootstrap_model(config: ResolvedConfig, env: EnvironmentInfo) -> bool:
     if 'bootstrap_model' in config.ai:
         return bool(config.ai.get('bootstrap_model'))
-    return env.resolved_mode == 'container'
+    return True
 
 
 def _ensure_ollama_model(paths: Paths, config: ResolvedConfig, env: EnvironmentInfo, manifest: ManifestTransaction, dry_run: bool) -> bool:
@@ -1078,17 +1098,30 @@ def _ensure_ollama_model(paths: Paths, config: ResolvedConfig, env: EnvironmentI
     ollama = resolve_binary('ollama')
     if not ollama:
         return False
-    model = str(config.ai.get('model', 'llama3.2:3b'))
     if not _start_ollama_service(paths, manifest, dry_run):
         return False
+
+    # Collect the unique set of models needed across all AI commands.
+    models_needed: list[str] = []
+    seen: set[str] = set()
+    default = str(config.ai.get('model', 'qwen2.5-coder:7b'))
+    for key in ('model', 'ask_model', 'fix_model', 'agent_model'):
+        m = str(config.ai.get(key, '')).strip() or default
+        if m not in seen:
+            models_needed.append(m)
+            seen.add(m)
+
     if dry_run:
-        print('[dry-run]', ollama, 'pull', model)
+        for m in models_needed:
+            print('[dry-run]', ollama, 'pull', m)
         return True
-    if _has_ollama_model(ollama, model):
-        return True
-    if not _run([ollama, 'pull', model], dry_run=False):
-        return False
-    _record_packages(manifest, [f'ollama-model:{model}'])
+
+    for m in models_needed:
+        if _has_ollama_model(ollama, m):
+            continue
+        if not _run([ollama, 'pull', m], dry_run=False):
+            return False
+        _record_packages(manifest, [f'ollama-model:{m}'])
     return True
 
 
@@ -1107,10 +1140,17 @@ def _validate_strict_core(config: ResolvedConfig, env: EnvironmentInfo) -> None:
         failures.append(f'missing required tool: {tool}')
 
     if binary_available('ollama') and _should_bootstrap_model(config, env):
-        model = str(config.ai.get('model', 'llama3.2:3b'))
         ollama = resolve_binary('ollama')
-        if not ollama or not _has_ollama_model(ollama, model):
-            failures.append(f'missing required ollama model: {model}')
+        seen: set[str] = set()
+        for key in ('model', 'ask_model', 'fix_model', 'agent_model'):
+            m = str(config.ai.get(key, '')).strip()
+            if not m:
+                m = str(config.ai.get('model', 'qwen2.5-coder:7b'))
+            if m in seen:
+                continue
+            seen.add(m)
+            if not ollama or not _has_ollama_model(ollama, m):
+                failures.append(f'missing required ollama model: {m}')
 
     if failures:
         summary = '\n'.join(f'  - {entry}' for entry in failures)
@@ -1129,7 +1169,45 @@ def _install_core_fallbacks(paths: Paths, config: ResolvedConfig, env: Environme
     if binary_available(*TOOL_BINARIES['ollama']):
         _ensure_ollama_model(paths, config, env, manifest, dry_run)
 
-def install_core(paths: Paths, config: ResolvedConfig, env: EnvironmentInfo, dry_run: bool, assume_yes: bool) -> None:
+_ZSH_PLUGINS: dict[str, str] = {
+    "zsh-autosuggestions": "https://github.com/zsh-users/zsh-autosuggestions.git",
+    "zsh-syntax-highlighting": "https://github.com/zsh-users/zsh-syntax-highlighting.git",
+}
+
+
+def _install_zsh_plugins(paths: Paths, manifest: ManifestTransaction) -> None:
+    if not shutil.which("git"):
+        return
+    plugin_dir = paths.home / ".local/share/zsh-plugins"
+    plugin_dir.mkdir(parents=True, exist_ok=True)
+    for name, url in _ZSH_PLUGINS.items():
+        dest = plugin_dir / name
+        if dest.exists():
+            subprocess.run(
+                ["git", "-C", str(dest), "pull", "--ff-only", "-q"],
+                check=False, capture_output=True,
+            )
+        else:
+            ok(f"Cloning {name}...")
+            result = subprocess.run(
+                ["git", "clone", "--depth=1", "-q", url, str(dest)],
+                check=False, capture_output=True,
+            )
+            if result.returncode == 0:
+                manifest.files_created.append(str(dest))
+            else:
+                warn(f"Could not clone {name} — shell plugin will be skipped")
+
+
+def _install_example_plugin(paths: Paths, manifest: ManifestTransaction) -> None:
+    from .plugins import EXAMPLE_PLUGIN_CONTENT
+    disabled_path = paths.plugins_dir / "example.py.disabled"
+    if not disabled_path.exists():
+        disabled_path.write_text(EXAMPLE_PLUGIN_CONTENT, encoding="utf-8")
+        manifest.files_created.append(str(disabled_path))
+
+
+def install_core(paths: Paths, config: ResolvedConfig, env: EnvironmentInfo, dry_run: bool, assume_yes: bool, *, allow_packages: bool = False) -> None:
     manifest = begin_transaction(config.profile, env.resolved_mode, ["core"])
     config.features["core"] = True
     _apply_config_paths(paths, config)
@@ -1143,7 +1221,7 @@ def install_core(paths: Paths, config: ResolvedConfig, env: EnvironmentInfo, dry
     print(f"  shell fragment: {shell_fragment_path(paths, config.shell)}")
     _confirm("Apply Zenith core changes?", assume_yes, dry_run)
 
-    _install_packages(env, CORE_PACKAGES, manifest, dry_run=dry_run)
+    _install_packages(env, CORE_PACKAGES, manifest, dry_run=dry_run, allow_packages=allow_packages)
     _install_core_fallbacks(paths, config, env, manifest, dry_run=dry_run)
     _validate_strict_core(config, env)
 
@@ -1155,6 +1233,8 @@ def install_core(paths: Paths, config: ResolvedConfig, env: EnvironmentInfo, dry
     _install_local_launchers(paths, manifest)
     _write_shell_fragment(paths, config, manifest)
     _install_core_assets(paths, manifest)
+    _install_zsh_plugins(paths, manifest)
+    _install_example_plugin(paths, manifest)
     write_manifest(paths, manifest)
     ok("Core installed")
 

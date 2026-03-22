@@ -2,6 +2,55 @@ export PATH="$HOME/.local/bin:$PATH"
 export ZENITH_STATE_DIR="$HOME/.config/zenith/state"
 mkdir -p "$ZENITH_STATE_DIR"
 
+# -----------------------------------------------------------------------------
+# History — large, shared across sessions, deduped
+# -----------------------------------------------------------------------------
+HISTSIZE=100000
+SAVEHIST=200000
+setopt HIST_EXPIRE_DUPS_FIRST
+setopt HIST_IGNORE_DUPS
+setopt HIST_IGNORE_SPACE
+setopt HIST_VERIFY
+setopt SHARE_HISTORY
+setopt INC_APPEND_HISTORY
+
+# -----------------------------------------------------------------------------
+# zsh options
+# -----------------------------------------------------------------------------
+setopt AUTO_PUSHD
+setopt PUSHD_IGNORE_DUPS
+setopt PUSHD_MINUS
+setopt GLOB_DOTS
+setopt EXTENDED_GLOB
+setopt COMPLETE_IN_WORD
+setopt ALWAYS_TO_END
+setopt AUTO_MENU
+setopt NO_BEEP
+
+# -----------------------------------------------------------------------------
+# Completion — fast, fuzzy, colored
+# -----------------------------------------------------------------------------
+autoload -Uz compinit
+# Only rebuild .zcompdump once per day; use cached version otherwise
+if [[ -n ${ZDOTDIR:-$HOME}/.zcompdump(#qN.mh+24) ]]; then
+  compinit
+else
+  compinit -C
+fi
+
+zstyle ':completion:*' menu select
+zstyle ':completion:*' matcher-list 'm:{a-zA-Z}={A-Za-z}' 'r:|=*' 'l:|=* r:|=*'
+zstyle ':completion:*' list-colors "${(s.:.)LS_COLORS}"
+zstyle ':completion:*' use-cache yes
+zstyle ':completion:*' cache-path "${ZDOTDIR:-$HOME}/.zcompcache"
+zstyle ':completion:*:descriptions' format '[%d]'
+zstyle ':completion:*:warnings' format 'No matches: %d'
+zstyle ':completion:*:*:*:*:processes' command 'ps -u $USER -o pid,user,comm -w -w'
+zstyle ':completion:*:git-checkout:*' sort false
+
+# -----------------------------------------------------------------------------
+# Ollama autostart
+# -----------------------------------------------------------------------------
 if command -v ollama >/dev/null 2>&1 && ! ollama list >/dev/null 2>&1; then
   __ZENITH_OLLAMA_PID_FILE="$ZENITH_STATE_DIR/ollama.pid"
   if [ ! -f "$__ZENITH_OLLAMA_PID_FILE" ] || ! kill -0 "$(cat "$__ZENITH_OLLAMA_PID_FILE" 2>/dev/null)" 2>/dev/null; then
@@ -12,6 +61,9 @@ if command -v ollama >/dev/null 2>&1 && ! ollama list >/dev/null 2>&1; then
   fi
 fi
 
+# -----------------------------------------------------------------------------
+# Prompt and directory jumping
+# -----------------------------------------------------------------------------
 if command -v starship >/dev/null 2>&1; then
   eval "$(starship init zsh)"
 fi
@@ -20,10 +72,50 @@ if command -v zoxide >/dev/null 2>&1; then
   eval "$(zoxide init zsh)"
 fi
 
+# -----------------------------------------------------------------------------
+# fzf — fuzzy search for files, history, and directories
+# -----------------------------------------------------------------------------
+export FZF_DEFAULT_COMMAND='rg --files --hidden --follow --glob "!.git" 2>/dev/null'
+export FZF_DEFAULT_OPTS='
+  --height=50% --layout=reverse --border=rounded --info=inline
+  --prompt="  " --pointer="▶" --marker="✓"
+  --color=bg+:#1e2030,bg:#1a1b26,spinner:#7aa2f7,hl:#f7768e
+  --color=fg:#cdd6f4,header:#f7768e,info:#7aa2f7,pointer:#7aa2f7
+  --color=marker:#9ece6a,fg+:#cdd6f4,prompt:#7aa2f7,hl+:#f7768e
+  --bind=ctrl-d:preview-page-down,ctrl-u:preview-page-up
+  --bind=ctrl-/:toggle-preview
+'
+export FZF_CTRL_T_COMMAND="$FZF_DEFAULT_COMMAND"
+export FZF_CTRL_T_OPTS='--preview "bat --color=always --style=numbers --line-range=:60 {} 2>/dev/null || ls -la {}"'
+export FZF_ALT_C_COMMAND='find . -mindepth 1 -maxdepth 5 -type d -not -path "*/\.*" 2>/dev/null'
+export FZF_ALT_C_OPTS='--preview "eza --tree --icons --level=2 --color=always {} 2>/dev/null || ls {}"'
+export FZF_CTRL_R_OPTS='--sort --exact --preview "echo {}" --preview-window=down:3:wrap'
+
+for __f in \
+  "$HOME/.fzf.zsh" \
+  /usr/share/fzf/shell/key-bindings.zsh \
+  /usr/share/doc/fzf/examples/key-bindings.zsh; do
+  if [ -f "$__f" ]; then source "$__f"; break; fi
+done
+unset __f
+
+# -----------------------------------------------------------------------------
+# Zenith surface upgrade check (max once per hour)
+# -----------------------------------------------------------------------------
 if command -v zen >/dev/null 2>&1; then
-  zen upgrade surface --startup-check 2>/dev/null || true
+  __zenith_upgrade_stamp="$ZENITH_STATE_DIR/last_upgrade_check"
+  __zenith_now=$(date +%s)
+  __zenith_last=$(cat "$__zenith_upgrade_stamp" 2>/dev/null || printf '0')
+  if [ $(( __zenith_now - __zenith_last )) -gt 3600 ]; then
+    zen upgrade surface --startup-check 2>/dev/null || true
+    printf '%s\n' "$__zenith_now" > "$__zenith_upgrade_stamp"
+  fi
+  unset __zenith_upgrade_stamp __zenith_now __zenith_last
 fi
 
+# -----------------------------------------------------------------------------
+# Zenith stderr capture for `zen fix`
+# -----------------------------------------------------------------------------
 if [[ -o interactive ]] && [[ -z "${__ZENITH_CAPTURE_INSTALLED:-}" ]]; then
   typeset -g __ZENITH_CAPTURE_INSTALLED=1
   typeset -g __ZENITH_SESSION_STDERR="$ZENITH_STATE_DIR/session.stderr"
@@ -38,9 +130,9 @@ if [[ -o interactive ]] && [[ -z "${__ZENITH_CAPTURE_INSTALLED:-}" ]]; then
         return
         ;;
     esac
-    print -r -- "$PWD" > "$ZENITH_STATE_DIR/last_pwd"
-    print -r -- "$cmd" > "$ZENITH_STATE_DIR/last_command"
-    : > "$ZENITH_STATE_DIR/last_stderr"
+    print -r -- "$PWD" >| "$ZENITH_STATE_DIR/last_pwd"
+    print -r -- "$cmd" >| "$ZENITH_STATE_DIR/last_command"
+    : >| "$ZENITH_STATE_DIR/last_stderr"
     typeset -g __ZENITH_ERR_OFFSET
     __ZENITH_ERR_OFFSET=$(wc -c < "$__ZENITH_SESSION_STDERR")
   }
@@ -50,14 +142,14 @@ if [[ -o interactive ]] && [[ -z "${__ZENITH_CAPTURE_INSTALLED:-}" ]]; then
     local exit_status=$?
     local start_offset="${__ZENITH_ERR_OFFSET:-0}"
     local end_offset=0
-    print -r -- "$exit_status" > "$ZENITH_STATE_DIR/last_status"
+    print -r -- "$exit_status" >| "$ZENITH_STATE_DIR/last_status"
     if [ -f "$__ZENITH_SESSION_STDERR" ]; then
       end_offset=$(wc -c < "$__ZENITH_SESSION_STDERR")
     fi
     if [ "$end_offset" -gt "$start_offset" ]; then
-      tail -c +$((start_offset + 1)) "$__ZENITH_SESSION_STDERR" > "$ZENITH_STATE_DIR/last_stderr" || true
+      tail -c +$((start_offset + 1)) "$__ZENITH_SESSION_STDERR" >| "$ZENITH_STATE_DIR/last_stderr" || true
     else
-      : > "$ZENITH_STATE_DIR/last_stderr"
+      : >| "$ZENITH_STATE_DIR/last_stderr"
     fi
   }
 
@@ -66,5 +158,84 @@ if [[ -o interactive ]] && [[ -z "${__ZENITH_CAPTURE_INSTALLED:-}" ]]; then
   add-zsh-hook precmd __zenith_precmd
 fi
 
+# -----------------------------------------------------------------------------
+# Aliases — use the better tools Zenith installs
+# -----------------------------------------------------------------------------
 alias zenith="zen"
 alias dash="zen workspace"
+
+if command -v eza >/dev/null 2>&1; then
+  alias ls='eza --icons --group-directories-first --color=always'
+  alias ll='eza -la --icons --group-directories-first --git --color=always'
+  alias la='eza -la --icons --group-directories-first --git --color=always'
+  alias lt='eza --tree --icons --level=2 --color=always'
+  alias llt='eza --tree --icons --level=3 --color=always'
+fi
+
+if command -v bat >/dev/null 2>&1; then
+  alias cat='bat --style=plain --paging=never'
+  alias less='bat --style=full --paging=always'
+fi
+
+if command -v rg >/dev/null 2>&1; then
+  alias grep='rg --color=auto'
+fi
+
+if command -v btop >/dev/null 2>&1; then
+  alias top='btop'
+fi
+
+alias ..='cd ..'
+alias ...='cd ../..'
+alias mkdir='mkdir -p'
+alias df='df -h'
+alias du='du -h'
+
+# Short AI helpers — `ai <request>`, `fix`, and `agent <goal>`
+ai() { zen ask "$*"; }
+fix() { zen fix "$@"; }
+agent() { zen agent "$*"; }
+
+# -----------------------------------------------------------------------------
+# zsh-autosuggestions — inline fish-style suggestions (right arrow to accept)
+# Must come after compinit and aliases.
+# -----------------------------------------------------------------------------
+for __f in \
+  "$HOME/.local/share/zsh-plugins/zsh-autosuggestions/zsh-autosuggestions.zsh" \
+  /usr/share/zsh-autosuggestions/zsh-autosuggestions.zsh \
+  /usr/share/zsh/plugins/zsh-autosuggestions/zsh-autosuggestions.zsh; do
+  if [ -f "$__f" ]; then
+    source "$__f"
+    ZSH_AUTOSUGGEST_STRATEGY=(history completion)
+    ZSH_AUTOSUGGEST_BUFFER_MAX_SIZE=20
+    ZSH_AUTOSUGGEST_USE_ASYNC=1
+    ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE='fg=#414868'
+    bindkey '^ ' autosuggest-accept    # ctrl+space to accept full suggestion
+    bindkey '^f' autosuggest-accept    # ctrl+f to accept full suggestion
+    break
+  fi
+done
+unset __f
+
+# -----------------------------------------------------------------------------
+# zsh-syntax-highlighting — must be sourced LAST
+# -----------------------------------------------------------------------------
+for __f in \
+  "$HOME/.local/share/zsh-plugins/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh" \
+  /usr/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh \
+  /usr/share/zsh/plugins/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh; do
+  if [ -f "$__f" ]; then
+    source "$__f"
+    ZSH_HIGHLIGHT_HIGHLIGHTERS=(main brackets pattern)
+    ZSH_HIGHLIGHT_STYLES[command]='fg=#9ece6a,bold'
+    ZSH_HIGHLIGHT_STYLES[alias]='fg=#7aa2f7,bold'
+    ZSH_HIGHLIGHT_STYLES[builtin]='fg=#7aa2f7'
+    ZSH_HIGHLIGHT_STYLES[function]='fg=#7aa2f7'
+    ZSH_HIGHLIGHT_STYLES[path]='fg=#cdd6f4,underline'
+    ZSH_HIGHLIGHT_STYLES[unknown-token]='fg=#f7768e'
+    ZSH_HIGHLIGHT_STYLES[single-quoted-argument]='fg=#e0af68'
+    ZSH_HIGHLIGHT_STYLES[double-quoted-argument]='fg=#e0af68'
+    break
+  fi
+done
+unset __f

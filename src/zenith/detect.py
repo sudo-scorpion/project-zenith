@@ -63,7 +63,13 @@ def detect_environment(mode: str) -> EnvironmentInfo:
     container, container_runtime, distrobox = _detect_container()
     gui = bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
     systemd = shutil.which("systemctl") is not None
-    gpu_tools = shutil.which("glxinfo") is not None or shutil.which("vulkaninfo") is not None
+    gpu_tools = (
+        shutil.which("nvidia-smi") is not None
+        or shutil.which("glxinfo") is not None
+        or shutil.which("vulkaninfo") is not None
+        or Path("/dev/nvidia0").exists()
+        or Path("/dev/dri/card0").exists()
+    )
 
     resolved_mode = mode
     if mode == "auto":

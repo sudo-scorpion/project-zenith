@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+import sys
+
 
 def info(message: str) -> None:
     print(f"[zen] {message}")
 
 
 def warn(message: str) -> None:
-    print(f"[warn] {message}")
+    print(f"[warn] {message}", file=sys.stderr)
 
 
 def note(message: str) -> None:
@@ -18,4 +20,4 @@ def ok(message: str) -> None:
 
 
 def fail(message: str) -> None:
-    print(f"[error] {message}")
+    print(f"[error] {message}", file=sys.stderr)

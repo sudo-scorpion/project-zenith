@@ -15,7 +15,8 @@ Use these commands to understand what Zenith did and what is active now.
 `probe.sh` checks for Zenith-owned artifacts such as:
 - config and data directories
 - shims in `~/.local/bin`
-- fallback binaries such as `ollama`, `kitty`, `kitten`, `zellij`, `yazi`, `ya`, `starship`, and sometimes `zig` for Ghostty builds
+- fallback binaries such as `ollama`, `kitty`, `kitten`, `zellij`, `yazi`, `ya`, `starship`
+- Ollama GPU libraries at `~/.local/lib/ollama`
 - managed Kitty, Ghostty, Zellij, and Starship assets
 - Podman container, image, and volume artifacts
 
@@ -72,7 +73,7 @@ podman exec -it zenith-shell zen config show
 
 - `profile`: `safe` or `personal`
 - `mode`: `auto`, `host`, or `container`
-- `shell`: `bash` or `zsh`
+- `shell`: `bash` or `zsh` (default: `zsh`)
 
 ### `[ai]`
 
@@ -80,14 +81,15 @@ These control AI behavior.
 
 - `provider`: currently `ollama`
 - `host`: Ollama endpoint, for example `http://127.0.0.1:11434`
-- `model`: default model. Zenith now ships with a single-model default of `qwen3.5:4b`
-- `ask_model`: optional faster model just for `zen ask`
-- `fix_model`: optional stronger model just for `zen fix`
-- `keep_alive`: how long Ollama keeps the model warm
+- `model`: default model (default: `qwen2.5-coder:7b`)
+- `ask_model`: model used for `zen ask` / `ai` shortcut (default: `qwen2.5-coder:7b`)
+- `fix_model`: model used for `zen fix` / `fix` shortcut (default: `qwen2.5-coder:7b`)
+- `keep_alive`: how long Ollama keeps the model in VRAM after last use (default: `30m`)
 - `timeout_seconds`: request timeout
-- `temperature`: lower is more deterministic
-- `num_ctx`: context size
-- `num_predict`: generation limit
+- `temperature`: lower is more deterministic (default: `0.0`)
+- `num_ctx`: context window size (default: `4096`)
+- `num_predict`: max tokens to generate (default: `160`)
+- `num_gpu`: number of GPU layers to offload (default: `99` — use all available)
 - `top_k`
 - `top_p`
 - `repeat_penalty`
@@ -106,7 +108,7 @@ These control workspace behavior.
 
 These matter only for host-native surface behavior.
 
-- `terminal`: preferred host terminal name
+- `terminal`: preferred host terminal name (default: `kitty`)
 - `orbit_profile`
 - `auto_sync`
 
@@ -159,7 +161,6 @@ In container mode, these paths are inside the container home and usually backed 
 If AI is too slow:
 - check `zen doctor` or `zen status --json` first
 - confirm whether Ollama is using GPU or CPU
-- use a smaller `ask_model`
-- keep `temperature = 0.0`
-- keep `num_predict` small for command generation
-- increase `keep_alive` so the model stays warm
+- ensure `num_gpu = 99` is set so all layers offload to VRAM
+- keep `temperature = 0.0` and `num_predict` small for fast command generation
+- `keep_alive = "30m"` keeps the model warm between commands — increase if you query frequently

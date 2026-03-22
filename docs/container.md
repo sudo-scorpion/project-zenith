@@ -13,9 +13,9 @@ Zenith is container-aware, not container-dependent.
 
 With `--mode auto`, Zenith resolves to `container` when those markers are present.
 
-## What lives where in the recommended setup
+## What lives where in the hybrid setup
 
-In the recommended hybrid setup:
+In the hybrid setup:
 
 Host:
 - lightweight Zenith CLI
@@ -77,8 +77,8 @@ Zenith bootstrap now supports container GPU control directly:
 ```
 
 What these mean:
-- `auto`: if `nvidia-smi` is available on the host, Zenith requests `--gpus all` for the Podman container
+- `auto`: if `nvidia-smi` is available on the host, Zenith requests `--device nvidia.com/gpu=all` for the Podman container
 - `nvidia`: require NVIDIA GPU passthrough; bootstrap fails early if the host NVIDIA runtime is not visible
 - `none`: do not request GPU passthrough; container AI stays CPU-only
 
-Zenith also adds `--hooks-dir $ZENITH_PODMAN_HOOKS_DIR` when that directory exists, and keeps `--security-opt label=disable` on the container create path. Zenith still does not install the host NVIDIA container toolkit automatically; that host prerequisite must already exist.
+Zenith now uses Podman's NVIDIA CDI device path and keeps `--security-opt label=disable` on the container create path. Zenith still does not install the host NVIDIA container toolkit or generate the host CDI spec automatically; that host prerequisite must already exist.

@@ -2,19 +2,15 @@
 .DS_Store
 Thumbs.db
 
-# Node
-node_modules/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-
 # Python
 __pycache__/
 *.py[cod]
 *.so
 .env
 .venv/
+venv/
 *.egg-info/
+.python-version
 
 # Build
 dist/
@@ -23,10 +19,13 @@ build/
 # IDEs
 .vscode/
 .idea/
+*.swp
+*.swo
+*~
 
 # Logs
 logs/
 *.log
 
-# Misc
-*.swp
+# Design / scratch docs (internal only)
+project_zenith_design_phase.md
