@@ -20,6 +20,10 @@ if command -v zoxide >/dev/null 2>&1; then
   eval "$(zoxide init bash)"
 fi
 
+if command -v zen >/dev/null 2>&1; then
+  zen upgrade surface --startup-check 2>/dev/null || true
+fi
+
 if [[ $- == *i* ]] && [ -z "${__ZENITH_CAPTURE_INSTALLED:-}" ]; then
   __ZENITH_CAPTURE_INSTALLED=1
   __ZENITH_SESSION_STDERR="$ZENITH_STATE_DIR/session.stderr"
@@ -62,6 +66,5 @@ if [[ $- == *i* ]] && [ -z "${__ZENITH_CAPTURE_INSTALLED:-}" ]; then
   fi
 fi
 
-alias zen="zen"
 alias zenith="zen"
 alias dash="zen workspace"

@@ -31,4 +31,6 @@ def open_workspace(config: ResolvedConfig) -> int:
     if not zellij:
         raise SystemExit("zellij is not installed")
     session = str(config.workspace.get("default_session", "zenith"))
-    return subprocess.run([zellij, "attach", session, "-c", "--layout", "zenith"], check=False, env=with_local_bin_path()).returncode
+    # The shipped zellij config sets `default_layout "zenith"`, so creating the
+    # session is enough on current zellij releases.
+    return subprocess.run([zellij, "attach", session, "-c"], check=False, env=with_local_bin_path()).returncode

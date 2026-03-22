@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from .models import Paths, ResolvedConfig
@@ -20,14 +21,34 @@ DEFAULTS = {
     },
     "ai": {
         "provider": "ollama",
-        "model": "llama3.2:3b",
+        "host": "http://127.0.0.1:11434",
+        "model": "qwen3.5:4b",
+        "ask_model": "",
+        "fix_model": "",
+        "keep_alive": "15m",
+        "timeout_seconds": 90,
+        "temperature": 0.0,
+        "num_ctx": 4096,
+        "num_predict": 160,
+        "top_k": 40,
+        "top_p": 0.9,
+        "repeat_penalty": 1.05,
+        "structured_output": True,
         "auto_execute_safe": False,
         "log_generated_commands": True,
     },
     "surface": {
-        "terminal": "ghostty",
+        "terminal": "kitty",
         "orbit_profile": "celestial",
         "auto_sync": False,
+    },
+    "updates": {
+        "check_on_startup": False,
+        "recommend_on_startup": True,
+        "auto_upgrade_on_startup": False,
+        "startup_interval_hours": 24,
+        "kitty_version": "",
+        "ghostty_version": "",
     },
     "workspace": {
         "default_session": "zenith",
@@ -39,43 +60,109 @@ DEFAULTS = {
     },
 }
 
+FEATURE_KEYS = ("core", "surface", "ai_nav", "ai_fix", "workspace", "orbit", "alias_overrides")
+AI_KEYS = (
+    "provider",
+    "host",
+    "model",
+    "ask_model",
+    "fix_model",
+    "keep_alive",
+    "timeout_seconds",
+    "temperature",
+    "num_ctx",
+    "num_predict",
+    "top_k",
+    "top_p",
+    "repeat_penalty",
+    "structured_output",
+    "auto_execute_safe",
+    "log_generated_commands",
+)
+SURFACE_KEYS = ("terminal", "orbit_profile", "auto_sync")
+UPDATE_KEYS = (
+    "check_on_startup",
+    "recommend_on_startup",
+    "auto_upgrade_on_startup",
+    "startup_interval_hours",
+    "kitty_version",
+    "ghostty_version",
+)
+WORKSPACE_KEYS = ("default_session", "auto_resume")
+PATH_KEYS = ("install_root", "log_dir")
+
+SECTION_COMMENTS = {
+    "features": [
+        "Turn Zenith feature groups on or off.",
+    ],
+    "ai": [
+        "AI runtime and generation settings.",
+        "Use ask_model for fast command suggestions and fix_model for stronger repair flows.",
+    ],
+    "surface": [
+        "Host-side terminal surface settings.",
+        "Zenith manages supported terminals in user space only.",
+    ],
+    "updates": [
+        "Surface install and upgrade policy.",
+        "check_on_startup: periodically check whether Zenith recommends a surface install or upgrade.",
+        "recommend_on_startup: print a recommendation during shell startup when Zenith sees one.",
+        "auto_upgrade_on_startup: apply the supported surface upgrade automatically during shell startup.",
+        "startup_interval_hours: minimum time between startup checks.",
+        "kitty_version: optional explicit Kitty version pin for deterministic installs/upgrades.",
+        "ghostty_version: optional explicit Ghostty version pin for deterministic installs/upgrades.",
+    ],
+    "workspace": [
+        "Workspace session defaults.",
+    ],
+    "paths": [
+        "Zenith-owned paths in your user space.",
+    ],
+}
+
+
+def _toml_scalar(value: object) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)):
+        return str(value)
+    return json.dumps(str(value))
+
+
+def _render_section(name: str, values: dict[str, object], keys: tuple[str, ...]) -> list[str]:
+    lines: list[str] = []
+    for comment in SECTION_COMMENTS.get(name, ()):
+        lines.append(f"# {comment}")
+    lines.append(f"[{name}]")
+    for key in keys:
+        lines.append(f"{key} = {_toml_scalar(values[key])}")
+    return lines
+
 
 def _format_toml(config: ResolvedConfig) -> str:
-    def bool_str(value: bool) -> str:
-        return "true" if value else "false"
-
-    return f'''profile = "{config.profile}"
-mode = "{config.mode}"
-shell = "{config.shell}"
-
-[features]
-core = {bool_str(config.features['core'])}
-surface = {bool_str(config.features['surface'])}
-ai_nav = {bool_str(config.features['ai_nav'])}
-ai_fix = {bool_str(config.features['ai_fix'])}
-workspace = {bool_str(config.features['workspace'])}
-orbit = {bool_str(config.features['orbit'])}
-alias_overrides = {bool_str(config.features['alias_overrides'])}
-
-[ai]
-provider = "{config.ai['provider']}"
-model = "{config.ai['model']}"
-auto_execute_safe = {bool_str(config.ai['auto_execute_safe'])}
-log_generated_commands = {bool_str(config.ai['log_generated_commands'])}
-
-[surface]
-terminal = "{config.surface['terminal']}"
-orbit_profile = "{config.surface['orbit_profile']}"
-auto_sync = {bool_str(config.surface['auto_sync'])}
-
-[workspace]
-default_session = "{config.workspace['default_session']}"
-auto_resume = {bool_str(config.workspace['auto_resume'])}
-
-[paths]
-install_root = "{config.paths['install_root']}"
-log_dir = "{config.paths['log_dir']}"
-'''
+    lines = [
+        "# Zenith configuration",
+        "# Edit this file with: zen config edit",
+        "# Inspect current state with: zen status --json, zen doctor, zen upgrade surface --check",
+        "",
+        "# Core identity",
+        f"profile = {_toml_scalar(config.profile)}",
+        f"mode = {_toml_scalar(config.mode)}",
+        f"shell = {_toml_scalar(config.shell)}",
+        "",
+    ]
+    lines.extend(_render_section("features", config.features, FEATURE_KEYS))
+    lines.append("")
+    lines.extend(_render_section("ai", config.ai, AI_KEYS))
+    lines.append("")
+    lines.extend(_render_section("surface", config.surface, SURFACE_KEYS))
+    lines.append("")
+    lines.extend(_render_section("updates", config.updates, UPDATE_KEYS))
+    lines.append("")
+    lines.extend(_render_section("workspace", config.workspace, WORKSPACE_KEYS))
+    lines.append("")
+    lines.extend(_render_section("paths", config.paths, PATH_KEYS))
+    return "\n".join(lines) + "\n"
 
 
 def default_config(profile: str = "safe", mode: str = "auto", shell: str | None = None) -> ResolvedConfig:
@@ -86,6 +173,7 @@ def default_config(profile: str = "safe", mode: str = "auto", shell: str | None 
         features=dict(DEFAULTS["features"]),
         ai=dict(DEFAULTS["ai"]),
         surface=dict(DEFAULTS["surface"]),
+        updates=dict(DEFAULTS["updates"]),
         workspace=dict(DEFAULTS["workspace"]),
         paths=dict(DEFAULTS["paths"]),
     )
@@ -93,7 +181,20 @@ def default_config(profile: str = "safe", mode: str = "auto", shell: str | None 
     return cfg
 
 
-def load_config(paths: Paths, cli_profile: str | None = None, cli_mode: str | None = None, cli_shell: str | None = None) -> ResolvedConfig:
+def normalize_terminal(terminal: str | None) -> str:
+    value = str(terminal or DEFAULTS["surface"]["terminal"]).strip().lower()
+    if not value:
+        raise ValueError("Config surface.terminal must be set")
+    return value
+
+
+def load_config(
+    paths: Paths,
+    cli_profile: str | None = None,
+    cli_mode: str | None = None,
+    cli_shell: str | None = None,
+    cli_terminal: str | None = None,
+) -> ResolvedConfig:
     cfg = default_config()
     if paths.config_file.exists():
         import tomllib
@@ -105,6 +206,7 @@ def load_config(paths: Paths, cli_profile: str | None = None, cli_mode: str | No
         cfg.features.update(data.get("features", {}))
         cfg.ai.update(data.get("ai", {}))
         cfg.surface.update(data.get("surface", {}))
+        cfg.updates.update(data.get("updates", {}))
         cfg.workspace.update(data.get("workspace", {}))
         cfg.paths.update(data.get("paths", {}))
     if cli_profile:
@@ -114,6 +216,8 @@ def load_config(paths: Paths, cli_profile: str | None = None, cli_mode: str | No
         cfg.mode = cli_mode
     if cli_shell:
         cfg.shell = normalize_shell(cli_shell)
+    if cli_terminal:
+        cfg.surface["terminal"] = normalize_terminal(cli_terminal)
     validate_config(cfg)
     return cfg
 
@@ -142,9 +246,37 @@ def validate_config(config: ResolvedConfig) -> None:
         supported = ", ".join(SUPPORTED_SHELLS)
         raise ValueError(f"Unsupported shell: {config.shell}. Supported shells: {supported}")
     config.shell = normalize_shell(config.shell)
-    if config.ai.get("provider") != "ollama":
+    if config.ai.get("provider") == "ollama":
+        pass
+    else:
         raise ValueError("V1 currently supports ollama only")
-    if config.surface.get("terminal") != "ghostty":
-        raise ValueError("V1 currently supports ghostty only for the surface layer")
+    if not str(config.ai.get("host", "")).strip():
+        raise ValueError("Config ai.host must be set")
+    if not str(config.ai.get("model", "")).strip():
+        raise ValueError("Config ai.model must be set")
+    if "nav_model" in config.ai and not str(config.ai.get("ask_model", "")).strip():
+        config.ai["ask_model"] = config.ai.get("nav_model", "")
+    for key in ("ask_model", "fix_model"):
+        if key in config.ai and config.ai[key] is not None:
+            config.ai[key] = str(config.ai[key]).strip()
+    for key in ("timeout_seconds", "num_ctx", "num_predict", "top_k"):
+        value = int(config.ai.get(key, DEFAULTS["ai"][key]))
+        if value <= 0:
+            raise ValueError(f"Config ai.{key} must be greater than zero")
+        config.ai[key] = value
+    for key in ("temperature", "top_p", "repeat_penalty"):
+        value = float(config.ai.get(key, DEFAULTS["ai"][key]))
+        if value < 0:
+            raise ValueError(f"Config ai.{key} must not be negative")
+        config.ai[key] = value
+    config.surface["terminal"] = normalize_terminal(config.surface.get("terminal"))
+    config.updates["kitty_version"] = str(config.updates.get("kitty_version", "")).strip()
+    config.updates["ghostty_version"] = str(config.updates.get("ghostty_version", "")).strip()
+    for key in ("check_on_startup", "recommend_on_startup", "auto_upgrade_on_startup"):
+        config.updates[key] = bool(config.updates.get(key, DEFAULTS["updates"][key]))
+    interval = int(config.updates.get("startup_interval_hours", DEFAULTS["updates"]["startup_interval_hours"]))
+    if interval < 0:
+        raise ValueError("Config updates.startup_interval_hours must not be negative")
+    config.updates["startup_interval_hours"] = interval
     if not config.paths.get("install_root") or not config.paths.get("log_dir"):
         raise ValueError("Config paths.install_root and paths.log_dir must be set")

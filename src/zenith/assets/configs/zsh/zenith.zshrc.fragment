@@ -20,6 +20,10 @@ if command -v zoxide >/dev/null 2>&1; then
   eval "$(zoxide init zsh)"
 fi
 
+if command -v zen >/dev/null 2>&1; then
+  zen upgrade surface --startup-check 2>/dev/null || true
+fi
+
 if [[ -o interactive ]] && [[ -z "${__ZENITH_CAPTURE_INSTALLED:-}" ]]; then
   typeset -g __ZENITH_CAPTURE_INSTALLED=1
   typeset -g __ZENITH_SESSION_STDERR="$ZENITH_STATE_DIR/session.stderr"
@@ -62,6 +66,5 @@ if [[ -o interactive ]] && [[ -z "${__ZENITH_CAPTURE_INSTALLED:-}" ]]; then
   add-zsh-hook precmd __zenith_precmd
 fi
 
-alias zen="zen"
 alias zenith="zen"
 alias dash="zen workspace"

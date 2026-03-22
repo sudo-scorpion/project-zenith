@@ -29,6 +29,7 @@ def build_paths(root: Path | None = None) -> Paths:
     last_status_file = state_dir / "last_status"
     last_pwd_file = state_dir / "last_pwd"
     session_stderr_file = state_dir / "session.stderr"
+    upgrade_state_file = state_dir / "upgrade_state.json"
     return Paths(
         root=root,
         home=home,
@@ -52,6 +53,7 @@ def build_paths(root: Path | None = None) -> Paths:
         last_status_file=last_status_file,
         last_pwd_file=last_pwd_file,
         session_stderr_file=session_stderr_file,
+        upgrade_state_file=upgrade_state_file,
     )
 
 

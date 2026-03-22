@@ -4,10 +4,12 @@ import json
 import os
 import subprocess
 
+from .ai import ollama_runtime_details
 from .binaries import binary_available, resolve_binary, with_local_bin_path
 from .manifest import latest_manifest_timestamp
 from .models import EnvironmentInfo, Paths, ResolvedConfig
 from .status import shell_integration_status, surface_status
+from .updates import surface_upgrade_report
 from .workspace import workspace_status
 
 CORE_TOOLS = {
@@ -33,10 +35,11 @@ def _missing_core_tools() -> list[str]:
 
 
 def doctor_report(paths: Paths, config: ResolvedConfig, env: EnvironmentInfo) -> list[dict[str, str]]:
-    model = str(config.ai.get("model", "llama3.2:3b"))
+    model = str(config.ai.get("model", "qwen3.5:4b"))
     missing_tools = _missing_core_tools()
     workspace = workspace_status(config)
     surface = surface_status(paths, config)
+    surface_upgrade = surface_upgrade_report(paths, config, env, allow_network=False)
     shell_integration = shell_integration_status(paths, config.shell)
     backups_writable = paths.backup_dir.exists() and os.access(paths.backup_dir, os.W_OK)
     manifest_timestamp = latest_manifest_timestamp(paths)
@@ -65,13 +68,34 @@ def doctor_report(paths: Paths, config: ResolvedConfig, env: EnvironmentInfo) ->
         report.append({"level": "PASS" if surface == "installed" else "WARN", "item": "surface", "detail": surface})
     else:
         report.append({"level": "PASS", "item": "surface", "detail": f"not requested ({surface})"})
+    upgrade_status = str(surface_upgrade.get("status", "unknown"))
+    upgrade_detail = str(surface_upgrade.get("message", "No surface upgrade data available"))
+    upgrade_level = "PASS"
+    if upgrade_status == "upgrade-available" or upgrade_status == "install-available":
+        upgrade_level = "WARN"
+    report.append({"level": upgrade_level, "item": "surface_upgrade", "detail": upgrade_detail})
     ollama = resolve_binary("ollama")
     if ollama:
         result = subprocess.run([ollama, "list"], capture_output=True, text=True, check=False, env=with_local_bin_path())
         has_model = model in result.stdout
         report.append({"level": "PASS" if has_model else "WARN", "item": "model", "detail": f"{model} available" if has_model else f"{model} not available"})
+        runtime = ollama_runtime_details()
+        if runtime["status"] == "running":
+            level = "PASS" if "GPU" in runtime["processor"].upper() else "WARN"
+            detail = f"{runtime['processor']} ({runtime['model']}, ctx {runtime['context'] or 'unknown'})"
+        elif runtime["status"] == "idle":
+            level = "PASS"
+            detail = "idle"
+        elif runtime["status"] == "unavailable":
+            level = "WARN"
+            detail = "ollama unavailable"
+        else:
+            level = "WARN"
+            detail = runtime["status"]
+        report.append({"level": level, "item": "ai_runtime", "detail": detail})
     else:
         report.append({"level": "WARN", "item": "model", "detail": f"{model} not available"})
+        report.append({"level": "WARN", "item": "ai_runtime", "detail": "ollama unavailable"})
     return report
 
 

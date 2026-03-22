@@ -142,7 +142,7 @@ flowchart TD
 
 ### Runtime features
 - `src/zenith/workspace.py`: Zellij session handling
-- `src/zenith/ai.py`: `nav` and `fix`
+- `src/zenith/ai.py`: `ask`/`nav` and `fix`
 - `src/zenith/surface.py`: orbit/surface behavior
 - `src/zenith/shells.py`: bash/zsh integration points
 

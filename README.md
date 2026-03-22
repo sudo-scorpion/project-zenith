@@ -1,6 +1,6 @@
 # Project Zenith
 
-Project Zenith has one setup command, one cleanup command, and one daily-use command.
+Project Zenith has one setup command, one cleanup command, one fresh-reset command, and one daily-use command.
 
 ## What Users Should Remember
 
@@ -16,6 +16,12 @@ Cleanup:
 ./teardown.sh
 ```
 
+Fresh reset:
+
+```bash
+./bootstrap.sh fresh
+```
+
 Daily use after setup:
 
 ```bash
@@ -24,21 +30,74 @@ zen
 
 That is the intended user experience.
 
-`./bootstrap.sh` now fails fast during container setup if it cannot provision the required core tools and Ollama model, so it will not pretend the setup finished when the container is still incomplete.
+`./bootstrap.sh` now fails fast during container setup if it cannot provision the required core tools and Ollama model, so it will not pretend the setup finished when the container is still incomplete. The default hybrid path keeps heavy AI and terminal dependencies in the container instead of installing them on the host.
 
 ## Modes
 
 Setup:
 
-- `./bootstrap.sh`: recommended full setup
-- `./bootstrap.sh host`: host-only setup
+- `./bootstrap.sh`: recommended hybrid setup, with lightweight host CLI and a fully provisioned container
+- `./bootstrap.sh --gpu nvidia`: same setup, but require NVIDIA GPU passthrough for the Podman container
+- `./bootstrap.sh --terminal kitty`: same setup, plus a host user-space Kitty install attempt and recorded surface-terminal preference
+- `zen upgrade surface`: install or upgrade the configured surface terminal in user space when Zenith knows how
+- `zen upgrade surface --check`: check whether Zenith recommends a surface install or upgrade before changing anything
+- `zen ask "<request>"`: turn a plain-English request into a terminal-friendly command suggestion
+- `./bootstrap.sh host`: host-only Zenith in user space only
 - `./bootstrap.sh container`: container-only setup
+- `./bootstrap.sh fresh`: clean reinstall of the recommended hybrid setup
+- `./bootstrap.sh host --fresh --terminal kitty`: clean reinstall of host Zenith with an explicit surface-terminal preference
+- `./bootstrap.sh container --fresh`: clean reinstall of the container side only
 
 Cleanup:
 
 - `./teardown.sh`: remove the recommended full setup
 - `./teardown.sh host`: remove host Zenith only
 - `./teardown.sh container`: remove container artifacts only
+- `./teardown.sh clean`: alias for the default full cleanup
+
+## Plain-English Picture
+
+Recommended setup, plain English:
+
+- host: lightweight `zen` launcher, config, and other user-owned Zenith files only
+- container: heavy runtime tools like `ollama`, `zellij`, `yazi`, `starship`, and model files, with optional NVIDIA GPU passthrough
+- host-only by design: `surface`, terminal config, shaders, GUI integration, and any explicit host terminal bootstrap you request
+
+Use these commands when you want transparency:
+
+- `./probe.sh`: see what Zenith owns on the host
+- `zen status --json`: see the active runtime state, including the selected surface terminal, installed surface version, recommended version, and startup upgrade policy
+- `zen doctor`: see whether major dependencies, AI runtime, and surface upgrade state are healthy
+- `zen upgrade surface --check`: see whether Zenith recommends installing or upgrading the configured surface terminal
+- `zen config show`: see the active config values
+
+For the full scenario guide, read [Deployment guide](docs/deployment.md). For tunables and records, read [Settings and visibility](docs/settings.md).
+
+## Surface Upgrade Management
+
+Use these when you want Zenith to manage the host-side terminal surface over time:
+
+- `zen upgrade surface --check`: tell me what Zenith recommends right now
+- `zen upgrade surface`: install or upgrade the configured supported surface terminal in user space
+- `zen config edit`: turn startup checks or auto-upgrades on or off in the `[updates]` section
+
+The startup controls live in `[updates]`:
+
+- `check_on_startup = true`: perform periodic upgrade checks during shell startup
+- `recommend_on_startup = true`: print a recommendation if Zenith sees an available install or upgrade
+- `auto_upgrade_on_startup = true`: actually apply the supported surface upgrade during startup
+- `startup_interval_hours = 24`: minimum time between startup checks
+
+## No-Sudo Host Rule
+
+Zenith no longer uses `sudo` during host bootstrap.
+
+What that means:
+
+- hybrid mode keeps the host light and puts the heavy runtime in Podman
+- host mode stays in your user space and does not make host package-manager changes
+- surface install stays in user space and will bootstrap supported terminals there when possible, including Kitty by default and Zig for Ghostty builds
+- if a host-side binary is not already available and Zenith does not ship a local bootstrap for it, Zenith tells you that plainly instead of trying to elevate privileges
 
 ## Uninstall And Cleanup
 
@@ -63,6 +122,11 @@ If you only want one side removed:
 
 Advanced direct CLI cleanup still exists through `zen uninstall`, but normal users should use `./teardown.sh`.
 
+If you want a true from-scratch reinstall, use:
+
+```bash
+./bootstrap.sh fresh
+```
 
 ## What Users Can Ignore
 
@@ -75,7 +139,7 @@ These are not normal user setup commands:
 ## What Zenith Includes
 
 - `core`: shell tooling, workspace support, AI helpers, status, rollback
-- `surface`: host-native terminal UX, Ghostty config, shaders, fonts, GUI integration
+- `surface`: host-native terminal UX settings, Kitty config, optional Ghostty assets, and GUI integration hooks
 - container-aware runtime detection and install behavior
 - bundled config assets and packaged Python entrypoints
 
@@ -86,11 +150,16 @@ Zenith is container-aware rather than container-dependent.
 - `core` works on host or in containers
 - `surface` is host-only
 - `./bootstrap.sh` defaults to the recommended hybrid setup
+- `./bootstrap.sh --gpu auto|nvidia|none` controls Podman container GPU passthrough
 - `./teardown.sh` removes the same hybrid setup by default
+
+For NVIDIA GPUs, Zenith can now request container GPU passthrough directly during bootstrap. Zenith still does not install the host NVIDIA container toolkit for you, so that host prerequisite must already exist.
 
 ## Docs
 
 - [Install notes](docs/install.md)
+- [Deployment guide](docs/deployment.md)
+- [Settings and visibility](docs/settings.md)
 - [Command reference](docs/commands.md)
 - [Container support](docs/container.md)
 - [Profiles](docs/profiles.md)

@@ -14,7 +14,7 @@ MANIFEST_DIR="$DATA_DIR/manifests"
 
 usage() {
   cat <<'EOF'
-Usage: ./teardown.sh [hybrid|host|container]
+Usage: ./teardown.sh [hybrid|host|container|clean]
 
 Most users should just run:
   ./teardown.sh
@@ -25,6 +25,7 @@ Modes:
   hybrid    Remove host Zenith plus container artifacts
   host      Remove host Zenith only
   container Remove container artifacts only
+  clean     Alias for the default full cleanup
 
 This script aggressively removes Zenith-owned artifacts, including:
 - Zenith config/state/data directories
@@ -131,6 +132,11 @@ remove_manifest_packages() {
       bootstrap:ollama)
         remove_path "$HOME/.local/bin/ollama"
         ;;
+      bootstrap:kitty:*)
+        remove_path "$HOME/.local/bin/kitty"
+        remove_path "$HOME/.local/bin/kitten"
+        remove_path "$HOME/.local/kitty.app"
+        ;;
       ollama-model:*)
         model="${package#ollama-model:}"
         if has_cmd ollama; then
@@ -157,19 +163,24 @@ cleanup_host() {
   remove_path "$HOME/.local/bin/zen"
   remove_path "$HOME/.local/bin/zenith"
   remove_path "$HOME/.local/bin/ollama"
+  remove_path "$HOME/.local/bin/kitty"
+  remove_path "$HOME/.local/bin/kitten"
   remove_path "$HOME/.local/bin/zellij"
   remove_path "$HOME/.local/bin/yazi"
   remove_path "$HOME/.local/bin/ya"
   remove_path "$HOME/.local/bin/starship"
+  remove_path "$HOME/.local/kitty.app"
   remove_path "$HOME/.ollama"
 
   remove_path "$HOME/.config/starship.toml"
+  remove_path "$HOME/.config/kitty/kitty.conf"
   remove_path "$HOME/.config/zellij/layouts/zenith.kdl"
   remove_path "$HOME/.config/zellij/config.kdl"
   remove_path "$HOME/.config/ghostty/shaders/celestial.glsl"
   remove_path "$HOME/.config/ghostty/shaders/matrix.glsl"
   remove_path "$HOME/.config/ghostty/shaders/quantum.glsl"
   remove_path "$HOME/.config/ghostty/shaders/void.glsl"
+  remove_path "$HOME/.config/ghostty/config"
 
   remove_path "$CONFIG_DIR"
   remove_path "$DATA_DIR"
@@ -188,7 +199,7 @@ cleanup_container() {
 }
 
 case "$MODE" in
-  hybrid)
+  hybrid|clean)
     cleanup_host
     cleanup_container
     ;;

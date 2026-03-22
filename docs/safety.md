@@ -4,7 +4,7 @@ Zenith is suggestion-first and rollback-aware.
 
 ## AI command policy
 
-- `zen nav` and `zen fix` generate output from local prompt templates
+- `zen ask` and `zen fix` generate output from local prompt templates
 - generated output is classified as `safe`, `review`, or `blocked`
 - only `safe` output may run with `--execute`
 - even `safe` execution still requires confirmation
@@ -14,8 +14,9 @@ Zenith is suggestion-first and rollback-aware.
 
 - managed files are backed up before Zenith rewrites them
 - `install --dry-run` previews work without writing config or manifests
-- `surface` is gated behind host mode and GUI detection
-- `install all` skips surface cleanly when host-only requirements are unavailable
+- `surface` is gated behind host mode
+- without a GUI session, Zenith skips only the GUI-facing surface assets
+- `install all` skips surface cleanly outside host mode and fails clearly when a requested host terminal cannot be installed
 
 ## Auditability
 
