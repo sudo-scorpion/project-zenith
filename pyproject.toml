@@ -48,6 +48,7 @@ zenith = [
   "assets/configs/zsh/*.fragment",
   "assets/configs/starship/*.toml",
   "assets/configs/zellij/*.kdl",
+  "assets/configs/kitty/*.conf",
   "assets/configs/ghostty/config",
   "assets/configs/ghostty/shaders/*.glsl",
 ]
