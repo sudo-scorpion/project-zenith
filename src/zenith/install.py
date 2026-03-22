@@ -1,15 +1,18 @@
 from __future__ import annotations
 
 import os
+import platform
 import shlex
 import shutil
 import subprocess
 import sys
 import textwrap
+import time
 from pathlib import Path
 
 from .assets import iter_asset_files, materialized_asset_path, read_asset_text
 from .backup import backup_file
+from .binaries import binary_available, resolve_binary, with_local_bin_path
 from .config import write_config
 from .logging_utils import info, ok, warn
 from .manifest import begin_transaction, write_manifest
@@ -34,6 +37,45 @@ SURFACE_PACKAGES = {
     "brew": ["ghostty", "font-jetbrains-mono-nerd-font", "mesa"],
 }
 
+BOOTSTRAP_PACKAGES = {
+    'cargo': {
+        'dnf': ['cargo', 'gcc', 'make', 'pkgconf-pkg-config'],
+        'pacman': ['cargo', 'base-devel', 'pkgconf'],
+        'apt': ['cargo', 'build-essential', 'pkg-config'],
+        'zypper': ['cargo', 'gcc', 'make', 'pkg-config'],
+        'apk': ['cargo', 'build-base', 'pkgconf'],
+        'brew': ['rust'],
+    },
+    'curl': {
+        'dnf': ['curl', 'tar'],
+        'pacman': ['curl', 'tar'],
+        'apt': ['curl', 'tar'],
+        'zypper': ['curl', 'tar'],
+        'apk': ['curl', 'tar'],
+        'brew': ['curl'],
+    },
+}
+
+CARGO_CRATES = {
+    'zellij': ['zellij'],
+    'starship': ['starship'],
+    'yazi': ['yazi-fm', 'yazi-cli'],
+}
+
+TOOL_BINARIES = {
+    'zellij': ('zellij',),
+    'yazi': ('yazi',),
+    'starship': ('starship',),
+    'ollama': ('ollama',),
+}
+
+OLLAMA_ARCHIVE_NAMES = {
+    'x86_64': 'amd64',
+    'amd64': 'amd64',
+    'aarch64': 'arm64',
+    'arm64': 'arm64',
+}
+
 
 def surface_support_error(env: EnvironmentInfo) -> str | None:
     if env.resolved_mode != "host":
@@ -48,7 +90,7 @@ def _run(command: list[str], dry_run: bool) -> bool:
         print("[dry-run]", " ".join(command))
         return True
     try:
-        result = subprocess.run(command, check=False)
+        result = subprocess.run(command, check=False, env=with_local_bin_path())
     except FileNotFoundError as exc:
         warn(f"Skipping command because a binary is missing: {exc}")
         return False
@@ -58,17 +100,32 @@ def _run(command: list[str], dry_run: bool) -> bool:
     return False
 
 
+def _run_capture(command: list[str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(command, capture_output=True, text=True, check=False, env=with_local_bin_path())
+
+
+def _is_root() -> bool:
+    return hasattr(os, 'geteuid') and os.geteuid() == 0
+
+
+def _privilege_prefix(package_manager: str) -> list[str]:
+    if package_manager == 'brew' or _is_root():
+        return []
+    return ['sudo']
+
+
 def _package_commands(package_manager: str, packages: list[str]) -> list[list[str]]:
+    prefix = _privilege_prefix(package_manager)
     if package_manager == "dnf":
-        return [["sudo", "dnf", "install", "-y", package] for package in packages]
+        return [prefix + ["dnf", "install", "-y", package] for package in packages]
     if package_manager == "pacman":
-        return [["sudo", "pacman", "-S", "--needed", "--noconfirm", package] for package in packages]
+        return [prefix + ["pacman", "-S", "--needed", "--noconfirm", package] for package in packages]
     if package_manager == "apt":
-        return [["sudo", "apt-get", "update"]] + [["sudo", "apt-get", "install", "-y", package] for package in packages]
+        return [prefix + ["apt-get", "update"]] + [prefix + ["apt-get", "install", "-y", package] for package in packages]
     if package_manager == "zypper":
-        return [["sudo", "zypper", "--non-interactive", "install", package] for package in packages]
+        return [prefix + ["zypper", "--non-interactive", "install", package] for package in packages]
     if package_manager == "apk":
-        return [["sudo", "apk", "add", package] for package in packages]
+        return [prefix + ["apk", "add", package] for package in packages]
     if package_manager == "brew":
         return [["brew", "install", package] for package in packages]
     return []
@@ -233,7 +290,7 @@ def _install_packages(env: EnvironmentInfo, package_map: dict[str, list[str]], m
     if not packages:
         warn(f"Skipping package install for unsupported package manager: {env.package_manager}")
         return
-    manifest.packages.extend(packages)
+    _record_packages(manifest, packages)
     failures = 0
     for command in _package_commands(env.package_manager, packages):
         if not _run(command, dry_run=dry_run):
@@ -241,6 +298,176 @@ def _install_packages(env: EnvironmentInfo, package_map: dict[str, list[str]], m
     if failures and not dry_run:
         warn(f"Package installation completed with {failures} warning(s); Zenith continued with local setup.")
 
+
+def _record_packages(manifest: ManifestTransaction, packages: list[str]) -> None:
+    for package in packages:
+        if package not in manifest.packages:
+            manifest.packages.append(package)
+
+
+def _install_specific_packages(env: EnvironmentInfo, packages: list[str], manifest: ManifestTransaction, dry_run: bool) -> bool:
+    commands = _package_commands(env.package_manager, packages)
+    if not commands:
+        return False
+    failures = 0
+    for command in commands:
+        if not _run(command, dry_run=dry_run):
+            failures += 1
+    if failures:
+        return False
+    _record_packages(manifest, packages)
+    return True
+
+
+def _ensure_helper_packages(env: EnvironmentInfo, helper: str, manifest: ManifestTransaction, dry_run: bool) -> bool:
+    if helper == 'cargo' and binary_available('cargo'):
+        return True
+    if helper == 'curl' and binary_available('curl'):
+        return True
+    packages = BOOTSTRAP_PACKAGES.get(helper, {}).get(env.package_manager)
+    if not packages:
+        warn(f'No fallback helper package mapping for {helper} on {env.package_manager}')
+        return False
+    return _install_specific_packages(env, packages, manifest, dry_run)
+
+
+def _install_with_cargo(paths: Paths, env: EnvironmentInfo, tool: str, manifest: ManifestTransaction, dry_run: bool) -> bool:
+    crates = CARGO_CRATES[tool]
+    binaries = TOOL_BINARIES[tool]
+    if binary_available(*binaries):
+        return True
+    if not _ensure_helper_packages(env, 'cargo', manifest, dry_run):
+        warn(f'Unable to install cargo toolchain for {tool}')
+        return False
+    cargo = resolve_binary('cargo') or 'cargo'
+    command = [cargo, 'install', '--locked', '--root', str(paths.home / '.local')] + crates
+    if not _run(command, dry_run=dry_run):
+        return False
+    if not dry_run and not binary_available(*binaries):
+        warn(f'{tool} fallback install completed but the expected binary was not found')
+        return False
+    _record_packages(manifest, [f'cargo:{tool}'])
+    return True
+
+
+def _ollama_download_url() -> str | None:
+    arch = OLLAMA_ARCHIVE_NAMES.get(platform.machine().lower())
+    if not arch:
+        return None
+    return f'https://ollama.com/download/ollama-linux-{arch}.tgz'
+
+
+def _install_ollama_fallback(paths: Paths, env: EnvironmentInfo, manifest: ManifestTransaction, dry_run: bool) -> bool:
+    if binary_available('ollama'):
+        return True
+    url = _ollama_download_url()
+    if not url:
+        warn(f'No ollama download defined for architecture {platform.machine()}')
+        return False
+    if not _ensure_helper_packages(env, 'curl', manifest, dry_run):
+        warn('Unable to install curl/tar needed for ollama bootstrap')
+        return False
+    archive = paths.cache_dir / f'ollama-{platform.machine().lower()}.tgz'
+    stage_dir = paths.cache_dir / 'ollama-stage'
+    curl = resolve_binary('curl') or 'curl'
+    if not _run([curl, '-fsSL', url, '-o', str(archive)], dry_run=dry_run):
+        return False
+    if dry_run:
+        print('[dry-run]', 'tar', '-xzf', str(archive), '-C', str(stage_dir))
+        print('[dry-run]', f'copy extracted ollama binary to {paths.bin_home / "ollama"}')
+        return True
+    if stage_dir.exists():
+        shutil.rmtree(stage_dir, ignore_errors=True)
+    stage_dir.mkdir(parents=True, exist_ok=True)
+    if not _run(['tar', '-xzf', str(archive), '-C', str(stage_dir)], dry_run=False):
+        return False
+    matches = [candidate for candidate in stage_dir.rglob('ollama') if candidate.is_file()]
+    if not matches:
+        warn('Unable to find an ollama binary in the downloaded archive')
+        return False
+    destination = paths.bin_home / 'ollama'
+    _copy_file(paths, matches[0], destination, manifest)
+    os.chmod(destination, 0o755)
+    _record_packages(manifest, ['bootstrap:ollama'])
+    return True
+
+
+def _ollama_ready(ollama: str) -> bool:
+    result = _run_capture([ollama, 'list'])
+    return result.returncode == 0
+
+
+def _record_service(manifest: ManifestTransaction, service: str) -> None:
+    if service not in manifest.services:
+        manifest.services.append(service)
+
+
+def _start_ollama_service(paths: Paths, manifest: ManifestTransaction, dry_run: bool) -> bool:
+    ollama = resolve_binary('ollama')
+    if not ollama:
+        return False
+    if _ollama_ready(ollama):
+        return True
+    log_file = paths.log_dir / 'ollama.log'
+    if dry_run:
+        print('[dry-run]', f'{ollama} serve >> {log_file} 2>&1 &')
+        return True
+    with log_file.open('ab') as handle:
+        process = subprocess.Popen([ollama, 'serve'], stdout=handle, stderr=handle, env=with_local_bin_path(), start_new_session=True)
+    deadline = time.time() + 20
+    while time.time() < deadline:
+        if _ollama_ready(ollama):
+            _record_service(manifest, 'ollama serve')
+            return True
+        if process.poll() is not None:
+            break
+        time.sleep(1)
+    warn('ollama serve did not become ready')
+    return False
+
+
+def _has_ollama_model(ollama: str, model: str) -> bool:
+    result = _run_capture([ollama, 'list'])
+    return result.returncode == 0 and model in result.stdout
+
+
+def _should_bootstrap_model(config: ResolvedConfig, env: EnvironmentInfo) -> bool:
+    if 'bootstrap_model' in config.ai:
+        return bool(config.ai.get('bootstrap_model'))
+    return env.resolved_mode == 'container'
+
+
+def _ensure_ollama_model(paths: Paths, config: ResolvedConfig, env: EnvironmentInfo, manifest: ManifestTransaction, dry_run: bool) -> bool:
+    if not _should_bootstrap_model(config, env):
+        return True
+    ollama = resolve_binary('ollama')
+    if not ollama:
+        return False
+    model = str(config.ai.get('model', 'llama3.2:3b'))
+    if not _start_ollama_service(paths, manifest, dry_run):
+        return False
+    if dry_run:
+        print('[dry-run]', ollama, 'pull', model)
+        return True
+    if _has_ollama_model(ollama, model):
+        return True
+    if not _run([ollama, 'pull', model], dry_run=False):
+        return False
+    _record_packages(manifest, [f'ollama-model:{model}'])
+    return True
+
+
+def _install_core_fallbacks(paths: Paths, config: ResolvedConfig, env: EnvironmentInfo, manifest: ManifestTransaction, dry_run: bool) -> None:
+    if not binary_available(*TOOL_BINARIES['zellij']):
+        _install_with_cargo(paths, env, 'zellij', manifest, dry_run)
+    if not binary_available(*TOOL_BINARIES['yazi']):
+        _install_with_cargo(paths, env, 'yazi', manifest, dry_run)
+    if not binary_available(*TOOL_BINARIES['starship']):
+        _install_with_cargo(paths, env, 'starship', manifest, dry_run)
+    if not binary_available(*TOOL_BINARIES['ollama']):
+        _install_ollama_fallback(paths, env, manifest, dry_run)
+    if binary_available(*TOOL_BINARIES['ollama']):
+        _ensure_ollama_model(paths, config, env, manifest, dry_run)
 
 def install_core(paths: Paths, config: ResolvedConfig, env: EnvironmentInfo, dry_run: bool, assume_yes: bool) -> None:
     manifest = begin_transaction(config.profile, env.resolved_mode, ["core"])
@@ -257,6 +484,7 @@ def install_core(paths: Paths, config: ResolvedConfig, env: EnvironmentInfo, dry
     _confirm("Apply Zenith core changes?", assume_yes, dry_run)
 
     _install_packages(env, CORE_PACKAGES, manifest, dry_run=dry_run)
+    _install_core_fallbacks(paths, config, env, manifest, dry_run=dry_run)
 
     if dry_run:
         ok("Core dry-run complete")

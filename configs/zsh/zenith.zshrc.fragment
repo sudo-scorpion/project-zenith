@@ -1,3 +1,17 @@
+export PATH="$HOME/.local/bin:$PATH"
+export ZENITH_STATE_DIR="$HOME/.config/zenith/state"
+mkdir -p "$ZENITH_STATE_DIR"
+
+if command -v ollama >/dev/null 2>&1 && ! ollama list >/dev/null 2>&1; then
+  __ZENITH_OLLAMA_PID_FILE="$ZENITH_STATE_DIR/ollama.pid"
+  if [ ! -f "$__ZENITH_OLLAMA_PID_FILE" ] || ! kill -0 "$(cat "$__ZENITH_OLLAMA_PID_FILE" 2>/dev/null)" 2>/dev/null; then
+    mkdir -p "$HOME/.config/zenith/logs"
+    nohup ollama serve >> "$HOME/.config/zenith/logs/ollama.log" 2>&1 &
+    printf '%s\n' "$!" > "$__ZENITH_OLLAMA_PID_FILE"
+    sleep 1
+  fi
+fi
+
 if command -v starship >/dev/null 2>&1; then
   eval "$(starship init zsh)"
 fi
@@ -5,10 +19,6 @@ fi
 if command -v zoxide >/dev/null 2>&1; then
   eval "$(zoxide init zsh)"
 fi
-
-export PATH="$HOME/.local/bin:$PATH"
-export ZENITH_STATE_DIR="$HOME/.config/zenith/state"
-mkdir -p "$ZENITH_STATE_DIR"
 
 if [[ -o interactive ]] && [[ -z "${__ZENITH_CAPTURE_INSTALLED:-}" ]]; then
   typeset -g __ZENITH_CAPTURE_INSTALLED=1

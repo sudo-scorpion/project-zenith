@@ -1,21 +1,23 @@
 from __future__ import annotations
 
-import shutil
 import subprocess
 
+from .binaries import resolve_binary, with_local_bin_path
 from .models import ResolvedConfig
 
 
 
 def workspace_status(config: ResolvedConfig) -> str:
-    if not shutil.which("zellij"):
+    zellij = resolve_binary("zellij")
+    if not zellij:
         return "unavailable"
     session = str(config.workspace.get("default_session", "zenith"))
     result = subprocess.run(
-        ["zellij", "list-sessions", "--short"],
+        [zellij, "list-sessions", "--short"],
         capture_output=True,
         text=True,
         check=False,
+        env=with_local_bin_path(),
     )
     if result.returncode != 0:
         return "unavailable"
@@ -25,7 +27,8 @@ def workspace_status(config: ResolvedConfig) -> str:
 
 
 def open_workspace(config: ResolvedConfig) -> int:
-    if not shutil.which("zellij"):
+    zellij = resolve_binary("zellij")
+    if not zellij:
         raise SystemExit("zellij is not installed")
     session = str(config.workspace.get("default_session", "zenith"))
-    return subprocess.run(["zellij", "attach", session, "-c", "--layout", "zenith"], check=False).returncode
+    return subprocess.run([zellij, "attach", session, "-c", "--layout", "zenith"], check=False, env=with_local_bin_path()).returncode

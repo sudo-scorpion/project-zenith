@@ -5,16 +5,6 @@ RUN dnf install -y \
     python3 \
     python3-pip \
     git \
-    zellij \
-    yazi \
-    eza \
-    bat \
-    starship \
-    zoxide \
-    fzf \
-    ripgrep \
-    btop \
-    fastfetch \
     && dnf clean all
 
 WORKDIR /opt/project-zenith

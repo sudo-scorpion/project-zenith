@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import json
-import shutil
 import subprocess
 from datetime import datetime
 from pathlib import Path
 
 from .assets import read_asset_text
+from .binaries import resolve_binary, with_local_bin_path
 from .models import AIResult, Paths, ResolvedConfig
 from .shells import shell_history_path
 
@@ -67,9 +67,10 @@ def _classify(command: str) -> tuple[str, bool, str]:
 
 
 def _ollama_generate(model: str, prompt: str) -> str:
-    if not shutil.which("ollama"):
+    ollama = resolve_binary("ollama")
+    if not ollama:
         raise SystemExit("ollama is not installed")
-    result = subprocess.run(["ollama", "run", model, prompt], capture_output=True, text=True, check=False)
+    result = subprocess.run([ollama, "run", model, prompt], capture_output=True, text=True, check=False, env=with_local_bin_path())
     output = result.stdout.strip().replace("```bash", "").replace("```", "").strip()
     if not output:
         raise SystemExit("ollama did not return a command")
@@ -210,4 +211,4 @@ def maybe_execute(result: AIResult, execute: bool) -> int:
     answer = input("Execute generated safe command? [y/N] " ).strip().lower()
     if answer != "y":
         return 0
-    return subprocess.run(result.command, shell=True, check=False).returncode
+    return subprocess.run(result.command, shell=True, check=False, env=with_local_bin_path()).returncode
