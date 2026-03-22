@@ -27,6 +27,18 @@ bash tests/integration/lifecycle.sh
 bash tests/integration/package_install.sh
 ```
 
+## One-command setup
+
+```bash
+./bootstrap.sh hybrid
+```
+
+Modes:
+
+- `./bootstrap.sh host`: full host install (`core` + `surface`)
+- `./bootstrap.sh container`: build and prepare a persistent `core` container
+- `./bootstrap.sh hybrid`: recommended setup, host `surface` plus container `core`
+
 ## Container support
 
 Zenith is container-aware rather than container-dependent.
@@ -44,7 +56,7 @@ Zenith is container-aware rather than container-dependent.
 - [Profiles](docs/profiles.md)
 - [Safety](docs/safety.md)
 - [Rollback](docs/rollback.md)
-- [Architecture](docs/architecture.md)
+- [Architecture diagrams](docs/architecture.md)
 - [Testing](docs/testing.md)
 
 ## Operational notes
