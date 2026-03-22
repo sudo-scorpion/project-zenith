@@ -1,0 +1,53 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "project-zenith"
+version = "0.1.0"
+description = "Container-aware terminal platform with core and surface layers"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [
+  { name = "Project Zenith" }
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: System :: Shells",
+  "Topic :: Utilities",
+]
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/project-zenith/project-zenith"
+Documentation = "https://github.com/project-zenith/project-zenith/tree/main/docs"
+
+[project.scripts]
+zen = "zenith.cli:main"
+zenith = "zenith.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+zenith = [
+  "assets/prompts/*.prompt",
+  "assets/configs/bash/*.fragment",
+  "assets/configs/zsh/*.fragment",
+  "assets/configs/starship/*.toml",
+  "assets/configs/zellij/*.kdl",
+  "assets/configs/ghostty/config",
+  "assets/configs/ghostty/shaders/*.glsl",
+]

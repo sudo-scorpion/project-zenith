@@ -1,0 +1,57 @@
+if command -v starship >/dev/null 2>&1; then
+  eval "$(starship init zsh)"
+fi
+
+if command -v zoxide >/dev/null 2>&1; then
+  eval "$(zoxide init zsh)"
+fi
+
+export PATH="$HOME/.local/bin:$PATH"
+export ZENITH_STATE_DIR="$HOME/.config/zenith/state"
+mkdir -p "$ZENITH_STATE_DIR"
+
+if [[ -o interactive ]] && [[ -z "${__ZENITH_CAPTURE_INSTALLED:-}" ]]; then
+  typeset -g __ZENITH_CAPTURE_INSTALLED=1
+  typeset -g __ZENITH_SESSION_STDERR="$ZENITH_STATE_DIR/session.stderr"
+  touch "$__ZENITH_SESSION_STDERR"
+  exec 2> >(tee -a "$__ZENITH_SESSION_STDERR" >&2)
+
+  __zenith_preexec() {
+    emulate -L zsh
+    local cmd="$1"
+    case "$cmd" in
+      __zenith_*|history*|fc* )
+        return
+        ;;
+    esac
+    print -r -- "$PWD" > "$ZENITH_STATE_DIR/last_pwd"
+    print -r -- "$cmd" > "$ZENITH_STATE_DIR/last_command"
+    : > "$ZENITH_STATE_DIR/last_stderr"
+    typeset -g __ZENITH_ERR_OFFSET
+    __ZENITH_ERR_OFFSET=$(wc -c < "$__ZENITH_SESSION_STDERR")
+  }
+
+  __zenith_precmd() {
+    emulate -L zsh
+    local exit_status=$?
+    local start_offset="${__ZENITH_ERR_OFFSET:-0}"
+    local end_offset=0
+    print -r -- "$exit_status" > "$ZENITH_STATE_DIR/last_status"
+    if [ -f "$__ZENITH_SESSION_STDERR" ]; then
+      end_offset=$(wc -c < "$__ZENITH_SESSION_STDERR")
+    fi
+    if [ "$end_offset" -gt "$start_offset" ]; then
+      tail -c +$((start_offset + 1)) "$__ZENITH_SESSION_STDERR" > "$ZENITH_STATE_DIR/last_stderr" || true
+    else
+      : > "$ZENITH_STATE_DIR/last_stderr"
+    fi
+  }
+
+  autoload -Uz add-zsh-hook
+  add-zsh-hook preexec __zenith_preexec
+  add-zsh-hook precmd __zenith_precmd
+fi
+
+alias zen="zen"
+alias zenith="zen"
+alias dash="zen workspace"

@@ -1,24 +1,54 @@
-# 🔭 Project Zenith: The Singularity
-**The Ultimate Truth of Terminal Performance.**
+# Project Zenith
 
-Project Zenith is a cross-distro, hyper-accelerated terminal ecosystem. It permanently eradicates the legacy CLI flaws of the past 40 years—replacing cryptic errors with AI self-healing, static visuals with GPU shaders, and lost sessions with quantum persistence. 
+Project Zenith is a modular terminal platform with a reliable `core` layer and an optional `surface` layer. The current release is Python-packaged, container-aware, manifest-backed, and safe to install into user-local XDG paths with rollback and uninstall support.
 
-You will never need to configure a terminal again.
+## Release status
 
-## 🧬 Monumental Paradigm Shifts
+Zenith now ships with:
 
-- **AI Auto-Medic (`fix`):** The era of Googling terminal errors is over. If a command fails, type `fix`. Zenith intercepts the `stderr`, runs it through local Llama 3.2, and instantly proposes the corrected, executable command.
-- **Quantum Persistence (`dash`):** Sessions never die. Running `dash` opens a pre-configured Zellij environment. If you close your window or crash, typing `dash` resurrects your layout, history, and running processes exactly as you left them.
-- **Holographic File System (HFS):** `cd`, `ls`, and `cat` are dead. Zenith natively maps them to their rust-based successors (`zoxide`, `eza`, `bat`). You now have syntax highlighting, tree-icons, git-integration, and teleportation by default.
-- **Orbital Engine V2:** Hardware-accelerated Ghostty shaders. Instantly shift your visual reality using `zen orbit[celestial | matrix | quantum | void]`, or let `zen sync` adjust it based on your time-of-day.
-- **Agentic Navigator (`nav`):** Pure Natural Language Processing. Type `nav extract this tar file to /tmp` and let the local AI write the bash script for you.
+- packaged CLI entrypoints via `pyproject.toml`
+- bundled prompts and config assets for non-editable installs
+- `core`, `surface`, `all`, `rollback`, `uninstall`, `doctor`, `status`, `config`, `workspace`, `orbit`, `sync`, `nav`, and `fix`
+- bash and zsh shell integration
+- container/runtime detection for Docker, Podman, Distrobox, and generic `container` markers
+- package-manager automation for `dnf`, `pacman`, `apt`, `zypper`, `apk`, and `brew`, with graceful warnings when packages are unavailable
+- smoke, integration, packaged-install verification, and CI coverage
 
-## 🚀 One-Line Installation (Fedora/Arch)
-
-*Prerequisites: Ensure you have a GPU and roughly 3GB of space for the Llama neural weights.*
+## Quick start
 
 ```bash
-git clone https://github.com/sudo-scorpion/project-zenith.git
-cd project-zenith 
-chmod +x zenith.sh
-./zenith.sh
+python3 -m pip install -r requirements.txt
+zen version
+zen install core --yes
+zen doctor --json
+zen status --json
+bash tests/smoke/router.sh
+bash tests/integration/lifecycle.sh
+bash tests/integration/package_install.sh
+```
+
+## Container support
+
+Zenith is container-aware rather than container-dependent.
+
+- `--mode auto` resolves to `container` when Docker, Podman, Distrobox, or generic `container` markers are present.
+- `install all` installs core and skips the surface layer with a warning when host-only requirements are not met.
+- mutable state stays under `~/.config/zenith` and `~/.local/share/zenith`
+- `zen status` and `zen doctor` report container runtime, Distrobox detection, package-manager detection, shell integration, workspace status, and manifest timestamp
+
+## Docs
+
+- [Install notes](docs/install.md)
+- [Command reference](docs/commands.md)
+- [Container support](docs/container.md)
+- [Profiles](docs/profiles.md)
+- [Safety](docs/safety.md)
+- [Rollback](docs/rollback.md)
+- [Architecture](docs/architecture.md)
+- [Testing](docs/testing.md)
+
+## Operational notes
+
+- `surface` still requires host mode plus a GUI session because it manages local terminal and shader assets
+- `nav` and `fix` require `ollama` plus the configured local model for generation
+- `fix` is best when the Zenith shell fragment is loaded, but it can also fall back to bash or zsh history

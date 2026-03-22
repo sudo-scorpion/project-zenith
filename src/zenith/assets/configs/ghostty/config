@@ -1,0 +1,5 @@
+font-family = "JetBrains Mono"
+font-size = 13
+theme = "celestial"
+background-opacity = 0.92
+custom-shader = "~/.config/ghostty/shaders/celestial.glsl"

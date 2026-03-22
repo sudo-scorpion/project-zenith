@@ -1,0 +1,13 @@
+format = """[╭─](bold cyan)$directory$git_branch$git_status
+[╰─](bold cyan)[zen](bold yellow) """
+
+[directory]
+style = "bold cyan"
+truncate_to_repo = false
+
+[git_branch]
+symbol = "git:"
+style = "bold yellow"
+
+[git_status]
+style = "bold red"
