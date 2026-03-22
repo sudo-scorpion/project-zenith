@@ -15,6 +15,11 @@ usage() {
   cat <<'EOF'
 Usage: ./bootstrap.sh [hybrid|host|container]
 
+Most users should just run:
+  ./bootstrap.sh
+
+That defaults to the recommended hybrid setup.
+
 Modes:
   hybrid    Install full host Zenith and prepare a persistent core container
   host      Install full host Zenith (core + surface)
@@ -61,9 +66,11 @@ prepare_container() {
 
   cat <<EOF
 Container prepared.
-Start it with:
+
+Daily use:
   podman start -ai $CONTAINER_NAME
-Open another shell with:
+
+Extra shell into the running container:
   podman exec -it $CONTAINER_NAME bash
 EOF
 }

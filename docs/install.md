@@ -86,3 +86,18 @@ Dry runs print the plan and package commands without writing config or manifest 
 
 - `zen rollback` reverts the latest manifest transaction
 - `zen uninstall` reverts all manifest transactions and removes Zenith-owned config/share directories
+
+
+## One-command cleanup
+
+```bash
+./teardown.sh
+```
+
+Cleanup modes:
+
+- `./teardown.sh`: remove the recommended hybrid setup
+- `./teardown.sh host`: remove host Zenith only
+- `./teardown.sh container`: remove container artifacts only
+
+`./teardown.sh` removes Zenith config/state, attempts package uninstall for the Python package, removes the persistent Podman container, drops the Zenith volumes, and removes the built Zenith image.

@@ -1,52 +1,66 @@
 # Project Zenith
 
-Project Zenith is a modular terminal platform with a reliable `core` layer and an optional `surface` layer. The current release is Python-packaged, container-aware, manifest-backed, and safe to install into user-local XDG paths with rollback and uninstall support.
+Project Zenith has one setup command, one cleanup command, and one daily-use command.
 
-## Release status
+## What Users Should Remember
 
-Zenith now ships with:
-
-- packaged CLI entrypoints via `pyproject.toml`
-- bundled prompts and config assets for non-editable installs
-- `core`, `surface`, `all`, `rollback`, `uninstall`, `doctor`, `status`, `config`, `workspace`, `orbit`, `sync`, `nav`, and `fix`
-- bash and zsh shell integration
-- container/runtime detection for Docker, Podman, Distrobox, and generic `container` markers
-- package-manager automation for `dnf`, `pacman`, `apt`, `zypper`, `apk`, and `brew`, with graceful warnings when packages are unavailable
-- smoke, integration, packaged-install verification, and CI coverage
-
-## Quick start
+Setup:
 
 ```bash
-python3 -m pip install -r requirements.txt
-zen version
-zen install core --yes
-zen doctor --json
-zen status --json
-bash tests/smoke/router.sh
-bash tests/integration/lifecycle.sh
-bash tests/integration/package_install.sh
+./bootstrap.sh
 ```
 
-## One-command setup
+Cleanup:
 
 ```bash
-./bootstrap.sh hybrid
+./teardown.sh
 ```
 
-Modes:
+Daily use after setup:
 
-- `./bootstrap.sh host`: full host install (`core` + `surface`)
-- `./bootstrap.sh container`: build and prepare a persistent `core` container
-- `./bootstrap.sh hybrid`: recommended setup, host `surface` plus container `core`
+```bash
+zen
+```
 
-## Container support
+That is the intended user experience.
+
+## Modes
+
+Setup:
+
+- `./bootstrap.sh`: recommended full setup
+- `./bootstrap.sh host`: host-only setup
+- `./bootstrap.sh container`: container-only setup
+
+Cleanup:
+
+- `./teardown.sh`: remove the recommended full setup
+- `./teardown.sh host`: remove host Zenith only
+- `./teardown.sh container`: remove container artifacts only
+
+## What Users Can Ignore
+
+These are not normal user setup commands:
+
+- `zenith.sh`: repo-local developer runner
+- `bin/zen`: packaged/internal CLI entrypoint
+- `tests/*.sh`: project verification scripts
+
+## What Zenith Includes
+
+- `core`: shell tooling, workspace support, AI helpers, status, rollback
+- `surface`: host-native terminal UX, Ghostty config, shaders, fonts, GUI integration
+- container-aware runtime detection and install behavior
+- bundled config assets and packaged Python entrypoints
+
+## Container Support
 
 Zenith is container-aware rather than container-dependent.
 
-- `--mode auto` resolves to `container` when Docker, Podman, Distrobox, or generic `container` markers are present.
-- `install all` installs core and skips the surface layer with a warning when host-only requirements are not met.
-- mutable state stays under `~/.config/zenith` and `~/.local/share/zenith`
-- `zen status` and `zen doctor` report container runtime, Distrobox detection, package-manager detection, shell integration, workspace status, and manifest timestamp
+- `core` works on host or in containers
+- `surface` is host-only
+- `./bootstrap.sh` defaults to the recommended hybrid setup
+- `./teardown.sh` removes the same hybrid setup by default
 
 ## Docs
 
@@ -58,9 +72,3 @@ Zenith is container-aware rather than container-dependent.
 - [Rollback](docs/rollback.md)
 - [Architecture diagrams](docs/architecture.md)
 - [Testing](docs/testing.md)
-
-## Operational notes
-
-- `surface` still requires host mode plus a GUI session because it manages local terminal and shader assets
-- `nav` and `fix` require `ollama` plus the configured local model for generation
-- `fix` is best when the Zenith shell fragment is loaded, but it can also fall back to bash or zsh history
