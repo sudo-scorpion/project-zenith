@@ -46,12 +46,12 @@ BOOTSTRAP_PACKAGES = {
         'apk': ['cargo', 'build-base', 'pkgconf'],
         'brew': ['rust'],
     },
-    'curl': {
-        'dnf': ['curl', 'tar'],
-        'pacman': ['curl', 'tar'],
-        'apt': ['curl', 'tar'],
-        'zypper': ['curl', 'tar'],
-        'apk': ['curl', 'tar'],
+    'archive': {
+        'dnf': ['curl', 'tar', 'unzip', 'zstd'],
+        'pacman': ['curl', 'tar', 'unzip', 'zstd'],
+        'apt': ['curl', 'tar', 'unzip', 'zstd'],
+        'zypper': ['curl', 'tar', 'unzip', 'zstd'],
+        'apk': ['curl', 'tar', 'unzip', 'zstd'],
         'brew': ['curl'],
     },
 }
@@ -69,12 +69,76 @@ TOOL_BINARIES = {
     'ollama': ('ollama',),
 }
 
-OLLAMA_ARCHIVE_NAMES = {
-    'x86_64': 'amd64',
-    'amd64': 'amd64',
-    'aarch64': 'arm64',
-    'arm64': 'arm64',
+DOWNLOADABLE_TOOLS = {
+    'zellij': {
+        'x86_64': {
+            'url': 'https://github.com/zellij-org/zellij/releases/latest/download/zellij-x86_64-unknown-linux-musl.tar.gz',
+            'archive_type': 'tar.gz',
+            'binaries': ('zellij',),
+        },
+        'amd64': {
+            'url': 'https://github.com/zellij-org/zellij/releases/latest/download/zellij-x86_64-unknown-linux-musl.tar.gz',
+            'archive_type': 'tar.gz',
+            'binaries': ('zellij',),
+        },
+        'aarch64': {
+            'url': 'https://github.com/zellij-org/zellij/releases/latest/download/zellij-aarch64-unknown-linux-musl.tar.gz',
+            'archive_type': 'tar.gz',
+            'binaries': ('zellij',),
+        },
+        'arm64': {
+            'url': 'https://github.com/zellij-org/zellij/releases/latest/download/zellij-aarch64-unknown-linux-musl.tar.gz',
+            'archive_type': 'tar.gz',
+            'binaries': ('zellij',),
+        },
+    },
+    'yazi': {
+        'x86_64': {
+            'url': 'https://github.com/sxyazi/yazi/releases/latest/download/yazi-x86_64-unknown-linux-musl.zip',
+            'archive_type': 'zip',
+            'binaries': ('yazi', 'ya'),
+        },
+        'amd64': {
+            'url': 'https://github.com/sxyazi/yazi/releases/latest/download/yazi-x86_64-unknown-linux-musl.zip',
+            'archive_type': 'zip',
+            'binaries': ('yazi', 'ya'),
+        },
+        'aarch64': {
+            'url': 'https://github.com/sxyazi/yazi/releases/latest/download/yazi-aarch64-unknown-linux-musl.zip',
+            'archive_type': 'zip',
+            'binaries': ('yazi', 'ya'),
+        },
+        'arm64': {
+            'url': 'https://github.com/sxyazi/yazi/releases/latest/download/yazi-aarch64-unknown-linux-musl.zip',
+            'archive_type': 'zip',
+            'binaries': ('yazi', 'ya'),
+        },
+    },
+    'ollama': {
+        'x86_64': {
+            'url': 'https://ollama.com/download/ollama-linux-amd64.tar.zst',
+            'archive_type': 'tar.zst',
+            'binaries': ('ollama',),
+        },
+        'amd64': {
+            'url': 'https://ollama.com/download/ollama-linux-amd64.tar.zst',
+            'archive_type': 'tar.zst',
+            'binaries': ('ollama',),
+        },
+        'aarch64': {
+            'url': 'https://ollama.com/download/ollama-linux-arm64.tar.zst',
+            'archive_type': 'tar.zst',
+            'binaries': ('ollama',),
+        },
+        'arm64': {
+            'url': 'https://ollama.com/download/ollama-linux-arm64.tar.zst',
+            'archive_type': 'tar.zst',
+            'binaries': ('ollama',),
+        },
+    },
 }
+
+STRICT_CORE_TOOLS = ('zellij', 'yazi', 'starship', 'ollama')
 
 
 def surface_support_error(env: EnvironmentInfo) -> str | None:
@@ -322,7 +386,7 @@ def _install_specific_packages(env: EnvironmentInfo, packages: list[str], manife
 def _ensure_helper_packages(env: EnvironmentInfo, helper: str, manifest: ManifestTransaction, dry_run: bool) -> bool:
     if helper == 'cargo' and binary_available('cargo'):
         return True
-    if helper == 'curl' and binary_available('curl'):
+    if helper == 'archive' and binary_available('curl') and binary_available('tar') and binary_available('unzip') and binary_available('zstd'):
         return True
     packages = BOOTSTRAP_PACKAGES.get(helper, {}).get(env.package_manager)
     if not packages:
@@ -350,46 +414,76 @@ def _install_with_cargo(paths: Paths, env: EnvironmentInfo, tool: str, manifest:
     return True
 
 
-def _ollama_download_url() -> str | None:
-    arch = OLLAMA_ARCHIVE_NAMES.get(platform.machine().lower())
-    if not arch:
+def _downloadable_tool_metadata(tool: str) -> dict[str, str | tuple[str, ...]] | None:
+    if not sys.platform.startswith('linux'):
         return None
-    return f'https://ollama.com/download/ollama-linux-{arch}.tgz'
+    return DOWNLOADABLE_TOOLS.get(tool, {}).get(platform.machine().lower())
+
+
+def _extract_archive(archive: Path, archive_type: str, stage_dir: Path, dry_run: bool) -> bool:
+    if archive_type in {'tar.gz', 'tgz'}:
+        command = ['tar', '-xzf', str(archive), '-C', str(stage_dir)]
+    elif archive_type == 'tar.zst':
+        command = ['tar', '--zstd', '-xf', str(archive), '-C', str(stage_dir)]
+    elif archive_type == 'zip':
+        command = ['unzip', '-oq', str(archive), '-d', str(stage_dir)]
+    else:
+        warn(f'Unknown archive type: {archive_type}')
+        return False
+    return _run(command, dry_run=dry_run)
+
+
+def _install_from_release_archive(paths: Paths, env: EnvironmentInfo, tool: str, manifest: ManifestTransaction, dry_run: bool) -> bool:
+    if binary_available(*TOOL_BINARIES[tool]):
+        return True
+    metadata = _downloadable_tool_metadata(tool)
+    if not metadata:
+        warn(f'No release bootstrap defined for {tool} on architecture {platform.machine()}')
+        return False
+    if not _ensure_helper_packages(env, 'archive', manifest, dry_run):
+        warn(f'Unable to install archive helpers needed for {tool}')
+        return False
+
+    url = str(metadata['url'])
+    archive_type = str(metadata['archive_type'])
+    binaries = tuple(str(entry) for entry in metadata['binaries'])
+    archive_name = url.rsplit('/', 1)[-1]
+    archive = paths.cache_dir / archive_name
+    stage_dir = paths.cache_dir / f'{tool}-stage'
+    curl = resolve_binary('curl') or 'curl'
+
+    if not _run([curl, '-fsSL', url, '-o', str(archive)], dry_run=dry_run):
+        return False
+    if dry_run:
+        if not _extract_archive(archive, archive_type, stage_dir, dry_run=True):
+            return False
+        for binary_name in binaries:
+            print('[dry-run]', f'copy extracted {binary_name} to {paths.bin_home / binary_name}')
+        return True
+
+    if stage_dir.exists():
+        shutil.rmtree(stage_dir, ignore_errors=True)
+    stage_dir.mkdir(parents=True, exist_ok=True)
+    if not _extract_archive(archive, archive_type, stage_dir, dry_run=False):
+        return False
+
+    for binary_name in binaries:
+        matches = [candidate for candidate in stage_dir.rglob(binary_name) if candidate.is_file()]
+        if not matches:
+            warn(f'Unable to find {binary_name} in the downloaded {tool} archive')
+            return False
+        destination = paths.bin_home / binary_name
+        _copy_file(paths, matches[0], destination, manifest)
+        os.chmod(destination, 0o755)
+
+    _record_packages(manifest, [f'bootstrap:{tool}'])
+    return True
 
 
 def _install_ollama_fallback(paths: Paths, env: EnvironmentInfo, manifest: ManifestTransaction, dry_run: bool) -> bool:
     if binary_available('ollama'):
         return True
-    url = _ollama_download_url()
-    if not url:
-        warn(f'No ollama download defined for architecture {platform.machine()}')
-        return False
-    if not _ensure_helper_packages(env, 'curl', manifest, dry_run):
-        warn('Unable to install curl/tar needed for ollama bootstrap')
-        return False
-    archive = paths.cache_dir / f'ollama-{platform.machine().lower()}.tgz'
-    stage_dir = paths.cache_dir / 'ollama-stage'
-    curl = resolve_binary('curl') or 'curl'
-    if not _run([curl, '-fsSL', url, '-o', str(archive)], dry_run=dry_run):
-        return False
-    if dry_run:
-        print('[dry-run]', 'tar', '-xzf', str(archive), '-C', str(stage_dir))
-        print('[dry-run]', f'copy extracted ollama binary to {paths.bin_home / "ollama"}')
-        return True
-    if stage_dir.exists():
-        shutil.rmtree(stage_dir, ignore_errors=True)
-    stage_dir.mkdir(parents=True, exist_ok=True)
-    if not _run(['tar', '-xzf', str(archive), '-C', str(stage_dir)], dry_run=False):
-        return False
-    matches = [candidate for candidate in stage_dir.rglob('ollama') if candidate.is_file()]
-    if not matches:
-        warn('Unable to find an ollama binary in the downloaded archive')
-        return False
-    destination = paths.bin_home / 'ollama'
-    _copy_file(paths, matches[0], destination, manifest)
-    os.chmod(destination, 0o755)
-    _record_packages(manifest, ['bootstrap:ollama'])
-    return True
+    return _install_from_release_archive(paths, env, 'ollama', manifest, dry_run)
 
 
 def _ollama_ready(ollama: str) -> bool:
@@ -457,11 +551,36 @@ def _ensure_ollama_model(paths: Paths, config: ResolvedConfig, env: EnvironmentI
     return True
 
 
+def _strict_install_enabled() -> bool:
+    return os.environ.get('ZENITH_STRICT_BOOTSTRAP', '').strip().lower() in {'1', 'true', 'yes', 'on'}
+
+
+def _validate_strict_core(config: ResolvedConfig, env: EnvironmentInfo) -> None:
+    if not _strict_install_enabled():
+        return
+
+    failures: list[str] = []
+    for tool in STRICT_CORE_TOOLS:
+        if binary_available(*TOOL_BINARIES[tool]):
+            continue
+        failures.append(f'missing required tool: {tool}')
+
+    if binary_available('ollama') and _should_bootstrap_model(config, env):
+        model = str(config.ai.get('model', 'llama3.2:3b'))
+        ollama = resolve_binary('ollama')
+        if not ollama or not _has_ollama_model(ollama, model):
+            failures.append(f'missing required ollama model: {model}')
+
+    if failures:
+        summary = '\n'.join(f'  - {entry}' for entry in failures)
+        raise SystemExit(f'Strict Zenith core bootstrap failed:\n{summary}')
+
+
 def _install_core_fallbacks(paths: Paths, config: ResolvedConfig, env: EnvironmentInfo, manifest: ManifestTransaction, dry_run: bool) -> None:
     if not binary_available(*TOOL_BINARIES['zellij']):
-        _install_with_cargo(paths, env, 'zellij', manifest, dry_run)
+        _install_from_release_archive(paths, env, 'zellij', manifest, dry_run)
     if not binary_available(*TOOL_BINARIES['yazi']):
-        _install_with_cargo(paths, env, 'yazi', manifest, dry_run)
+        _install_from_release_archive(paths, env, 'yazi', manifest, dry_run)
     if not binary_available(*TOOL_BINARIES['starship']):
         _install_with_cargo(paths, env, 'starship', manifest, dry_run)
     if not binary_available(*TOOL_BINARIES['ollama']):
@@ -485,6 +604,7 @@ def install_core(paths: Paths, config: ResolvedConfig, env: EnvironmentInfo, dry
 
     _install_packages(env, CORE_PACKAGES, manifest, dry_run=dry_run)
     _install_core_fallbacks(paths, config, env, manifest, dry_run=dry_run)
+    _validate_strict_core(config, env)
 
     if dry_run:
         ok("Core dry-run complete")

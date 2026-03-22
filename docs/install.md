@@ -82,6 +82,8 @@ zen install all --mode container --dry-run --yes
 
 Dry runs print the plan and package commands without writing config or manifest state.
 
+When `./bootstrap.sh` prepares a container, it runs `zen install core` in strict mode. If required container features such as `zellij`, `yazi`, `starship`, `ollama`, or the configured Ollama model cannot be provisioned, bootstrap stops instead of reporting a fake success.
+
 ## Uninstall and rollback
 
 - `zen rollback` reverts the latest manifest transaction

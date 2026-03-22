@@ -21,7 +21,8 @@ With `--mode auto`, Zenith resolves to `container` when those markers are presen
 - state remains under user-local XDG paths inside the container user's home
 - `status` reports `container_runtime`, `distrobox`, `workspace_status`, `shell_integration`, and `latest_manifest_timestamp`
 - package-manager automation still runs when a supported package tool is present in the container
-- when distro packages are missing, `zen install core` now falls back to a local bootstrap path for `zellij`, `yazi`, `starship`, and `ollama`
+- when distro packages are missing, `zen install core` now falls back to package-manager helpers plus release-download bootstrap paths for `zellij`, `yazi`, and `ollama`, and a local install path for `starship`
+- `./bootstrap.sh` runs container core install in strict mode and stops if those required tools or the configured Ollama model cannot be provisioned
 - in container mode, `zen install core` will also try to start Ollama and pull the configured default model so `zen nav` and `zen fix` can become usable without extra manual setup
 - the image itself only bakes in the Python runtime plus Zenith; optional terminal tools are still provisioned by `zen install core`
 

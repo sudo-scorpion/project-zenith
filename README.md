@@ -24,6 +24,8 @@ zen
 
 That is the intended user experience.
 
+`./bootstrap.sh` now fails fast during container setup if it cannot provision the required core tools and Ollama model, so it will not pretend the setup finished when the container is still incomplete.
+
 ## Modes
 
 Setup:
@@ -37,6 +39,30 @@ Cleanup:
 - `./teardown.sh`: remove the recommended full setup
 - `./teardown.sh host`: remove host Zenith only
 - `./teardown.sh container`: remove container artifacts only
+
+## Uninstall And Cleanup
+
+For most users, uninstalling Zenith means:
+
+```bash
+./teardown.sh
+```
+
+That removes the full recommended setup by default, including:
+
+- host Zenith config and state under `~/.config/zenith`
+- host Zenith data under `~/.local/share/zenith`
+- local shims such as `~/.local/bin/zen` and `~/.local/bin/zenith`
+- the installed Python package when present
+- the persistent Podman container, Zenith volumes, and built Zenith image
+
+If you only want one side removed:
+
+- `./teardown.sh host`
+- `./teardown.sh container`
+
+Advanced direct CLI cleanup still exists through `zen uninstall`, but normal users should use `./teardown.sh`.
+
 
 ## What Users Can Ignore
 

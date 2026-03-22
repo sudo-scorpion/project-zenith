@@ -12,7 +12,7 @@ WORKSPACE_MOUNT="${ZENITH_WORKSPACE_MOUNT:-$ROOT_DIR}"
 HOSTNAME_NAME="${ZENITH_HOSTNAME:-zenith}"
 
 usage() {
-  cat <<'EOF'
+  cat <<'HELP'
 Usage: ./bootstrap.sh [hybrid|host|container]
 
 Most users should just run:
@@ -32,7 +32,7 @@ Environment overrides:
   ZENITH_CONFIG_VOLUME=zenith-config
   ZENITH_DATA_VOLUME=zenith-data
   ZENITH_WORKSPACE_MOUNT=/path/to/workspace
-EOF
+HELP
 }
 
 require_cmd() {
@@ -49,22 +49,41 @@ install_host() {
   python3 -m zenith.cli install all --mode host --profile "$PROFILE" --yes
 }
 
+stop_container_if_running() {
+  podman stop "$CONTAINER_NAME" >/dev/null 2>&1 || true
+}
+
 prepare_container() {
   require_cmd podman
   cd "$ROOT_DIR"
 
   podman build -t "$IMAGE_NAME" .
-  podman volume create "$CONFIG_VOLUME" >/dev/null
-  podman volume create "$DATA_VOLUME" >/dev/null
+  podman volume inspect "$CONFIG_VOLUME" >/dev/null 2>&1 || podman volume create "$CONFIG_VOLUME" >/dev/null
+  podman volume inspect "$DATA_VOLUME" >/dev/null 2>&1 || podman volume create "$DATA_VOLUME" >/dev/null
   podman rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
 
-  podman create -it     --name "$CONTAINER_NAME"     --hostname "$HOSTNAME_NAME"     --entrypoint bash     --security-opt label=disable     -v "$CONFIG_VOLUME:/root/.config/zenith"     -v "$DATA_VOLUME:/root/.local/share/zenith"     -v "$WORKSPACE_MOUNT:/workspace"     -w /workspace     "$IMAGE_NAME" >/dev/null
+  podman create -it \
+    --name "$CONTAINER_NAME" \
+    --hostname "$HOSTNAME_NAME" \
+    --entrypoint bash \
+    --security-opt label=disable \
+    -v "$CONFIG_VOLUME:/root/.config/zenith" \
+    -v "$DATA_VOLUME:/root/.local/share/zenith" \
+    -v "$WORKSPACE_MOUNT:/workspace" \
+    -w /workspace \
+    "$IMAGE_NAME" >/dev/null
 
+  trap stop_container_if_running RETURN
   podman start "$CONTAINER_NAME" >/dev/null
-  podman exec "$CONTAINER_NAME" bash -lc "cd /workspace && zen install core --mode container --profile '$PROFILE' --yes"
-  podman stop "$CONTAINER_NAME" >/dev/null
+  podman exec "$CONTAINER_NAME" bash -lc "cd /workspace && ZENITH_STRICT_BOOTSTRAP=1 zen install core --mode container --profile '$PROFILE' --yes"
 
-  cat <<EOF
+  printf '\nContainer validation:\n'
+  podman exec "$CONTAINER_NAME" zen doctor
+
+  podman stop "$CONTAINER_NAME" >/dev/null
+  trap - RETURN
+
+  cat <<INFO
 Container prepared.
 
 Daily use:
@@ -72,7 +91,7 @@ Daily use:
 
 Extra shell into the running container:
   podman exec -it $CONTAINER_NAME bash
-EOF
+INFO
 }
 
 case "$MODE" in
